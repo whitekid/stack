@@ -9,6 +9,8 @@ import time
 class Context:
 	passwd = 'choe'
 	region = 'region0'
+	volume_dev = '/dev/sdb'
+
 	def __init__(self):
 		self.hostname = subprocess.check_output('hostname').strip()
 		# eth0: public
@@ -240,6 +242,9 @@ class GlanceInstaller(Installer):
 class NovaInstaller(Installer):
 	def _setup(self):
 		self.pkg_remove('nova-common')
+
+		self.shell('pvremove -ff -y %s' % self.context.volume_dev)
+
 	
 	def _run(self):
 		self.pkg_install('nova-api nova-cert nova-compute nova-compute-kvm nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
@@ -254,18 +259,18 @@ class NovaInstaller(Installer):
 		f.append('--use_deprecated_auth=false')
 		f.append('--auth_strategy=keystone')
 		f.append('--scheduler_driver=nova.scheduler.simple.SimpleScheduler')
-		f.append('--s3_host=%s', self.context.ip_eth0)
-		f.append('--ec2_host=%s', self.context.ip_eth0)
-		f.append('--rabbit_host=%s', self.context.ip_eth0)
-		f.append('--cc_host=%s', self.context.ip_eth0)
-		f.append('--nova_url=http://%s:8774/v1.1/', self.context.ip_eth0))
-		f.append('--routing_source_ip=%s', self.context.ip_eth0)
-		f.append('--glance_api_servers=%s:9292', self.context.ip_eth0)
+		f.append('--s3_host=%s' % self.context.ip_eth0)
+		f.append('--ec2_host=%s' % self.context.ip_eth0)
+		f.append('--rabbit_host=%s' % self.context.ip_eth0)
+		f.append('--cc_host=%s' % self.context.ip_eth0)
+		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.ip_eth0)
+		f.append('--routing_source_ip=%s' % self.context.ip_eth0)
+		f.append('--glance_api_servers=%s:9292' % self.context.ip_eth0)
 		f.append('--image_service=nova.image.glance.GlanceImageService')
 		f.append('--iscsi_ip_prefix=192.168.4')
-		f.append('--sql_connection=mysql://nova:%s@%s/nova', (self.context.passwd, self.context.ip_eth0))
-		f.append('--ec2_url=http://%s:8773/services/Cloud', self.context.ip_eth0)
-		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens', self.context.ip_eth0)
+		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.ip_eth0))
+		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.ip_eth0)
+		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.ip_eth0)
 		f.append('--api_paste_config=/etc/nova/api-paste.ini')
 		f.append('--libvirt_type=kvm')
 		#f.append('--libvirt_use_virtio_for_bridges=true')
@@ -273,9 +278,9 @@ class NovaInstaller(Installer):
 		f.append('--resume_guests_state_on_host_boot=true')
 		# vnc specific configuration
 		f.append('--novnc_enabled=true')
-		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html', self.context.ip_eth0)
-		f.append('--vncserver_proxyclient_address=%s', self.context.ip_eth0)
-		f.append('--vncserver_listen=%s', self.context.ip_eth0)
+		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.ip_eth0)
+		f.append('--vncserver_proxyclient_address=%s' % self.context.ip_eth0)
+		f.append('--vncserver_listen=%s' % self.context.ip_eth0)
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
 		f.append('--public_interface=eth0')
@@ -292,16 +297,16 @@ class NovaInstaller(Installer):
 		#f.append('--root_helper=sudo nova-rootwrap')
 		#f.append('--verbose')
 
-		# nova-volume 이름을 가진 lvm volume group이 있어야한다.
-		self.shell('pvcreate /dev/sda6')
-		self.shell('vgcreate nova-volumes /dev/sda6')
+		# TODO: nova-volume 이름을 가진 lvm volume group이 있어야한다.
+		self.shell('pvcreate %s' % self.context.volume_dev)
+		self.shell('vgcreate nova-volumes %s' % self.context.volume_dev)
 
 def main():
 	runner = Runner(Context())
-	runner.append(OsInstaller())
-	runner.append(DatabaseInstaller())
-	runner.append(KeystoneInstaller())
-	runner.append(GlanceInstaller())
+	#runner.append(OsInstaller())
+	#runner.append(DatabaseInstaller())
+	#runner.append(KeystoneInstaller())
+	#runner.append(GlanceInstaller())
 	runner.append(NovaInstaller())
 	runner.run()
 
