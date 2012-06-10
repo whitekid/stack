@@ -10,6 +10,9 @@ class Context:
 	passwd = 'choe'
 	region = 'region0'
 	volume_dev = '/dev/sdb'
+	private_net = '10.200.2.0/27'
+	bridge = 'br100'
+	bridge_iface = 'eth1'
 
 	def __init__(self):
 		self.hostname = subprocess.check_output('hostname').strip()
@@ -241,7 +244,8 @@ class GlanceInstaller(Installer):
 
 class NovaInstaller(Installer):
 	def _setup(self):
-		self.pkg_remove('nova-common')
+		self.pkg_remove('nova-common nova-compute-kvm')
+		self.pkg_remove('openstack-dashboard')
 
 		self.shell('pvremove -ff -y %s' % self.context.volume_dev)
 
@@ -297,17 +301,54 @@ class NovaInstaller(Installer):
 		#f.append('--root_helper=sudo nova-rootwrap')
 		#f.append('--verbose')
 
-		# TODO: nova-volume 이름을 가진 lvm volume group이 있어야한다.
+		# nova-volumes 이름을 가진 lvm volume group이 있어야한다.
 		self.shell('pvcreate %s' % self.context.volume_dev)
 		self.shell('vgcreate nova-volumes %s' % self.context.volume_dev)
 
+		self.shell('chown -R nova:nova /etc/nova')
+		self.shell('chmod 644 /etc/nova/nova.conf')
+
+		self.file('/etc/nova/api-paste.ini').replace(
+			'%SERVICE_TENANT_NAME%', 'service').replace(
+			'%SERVICE_USER%', 'nova').replace(
+			'%SERVICE_PASSWORD%', self.context.passwd)
+
+		self.shell('nova-manage db sync')
+
+		# TODO: 여기 정확한 아키텍처 파악 필요
+		self.shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=32' %
+			(self.context.private_net, self.context.bridge, self.context.bridge_iface))
+
+		# 이전과 비슷
+		#export OS_TENANT_NAME=admin
+		#export OS_USERNAME=admin
+		#export OS_PASSWORD=admin
+		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
+
+		self.shell("service libvirt-bin restart && service nova-network restart && service nova-compute restart && service nova-api restart && service nova-objectstore restart && service nova-scheduler restart && service nova-volume restart && service nova-consoleauth restart")
+
+		self.pkg_install('openstack-dashboard')
+		self.shell('service apache2 restart')
+
+
+class SwiftInstaller(Installer):
+	def _setup(self):
+		pass
+	
+	def _run(self):
+		self.pkg_install('swift swift-proxy swift-account swift-container swift-object')
+		self.pkg_install('xfsprogs curl python-pastedeploy')
+
+		# TODO: swift는 나중에 처리한다..
+
 def main():
 	runner = Runner(Context())
-	#runner.append(OsInstaller())
-	#runner.append(DatabaseInstaller())
-	#runner.append(KeystoneInstaller())
-	#runner.append(GlanceInstaller())
+	runner.append(OsInstaller())
+	runner.append(DatabaseInstaller())
+	runner.append(KeystoneInstaller())
+	runner.append(GlanceInstaller())
 	runner.append(NovaInstaller())
+	runner.append(SwiftInstaller())
 	runner.run()
 
 
