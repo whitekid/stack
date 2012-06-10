@@ -2,9 +2,9 @@
 # -*- coding: utf8 -*-
 import os, sys
 import subprocess
-import MySQLdb
 import json
 import time
+import getopt
 
 class Context:
 	passwd = 'choe'
@@ -39,7 +39,8 @@ class Installer:
 		
 
 	def pkg_remove(self, pkg):
-		self.shell("apt-get purge %s -y" % pkg)
+		try: self.shell("apt-get purge %s -y" % pkg)
+		except: pass
 
 	def pkg_install(self, pkg):
 		self.shell("apt-get install %s -y" % pkg)
@@ -331,6 +332,21 @@ class NovaInstaller(Installer):
 		self.shell('service apache2 restart')
 
 
+class NovaNodeInstaller(Installer):
+	"""Nova Computing Node
+	Assumtions:
+		- eth0: management network
+		- eth1: private network
+	"""
+	def _setup(self):
+		self.pkg_remove('ntp')
+		self.pkg_remove('nova-compute')
+
+	def _run(self):
+		self.pkg_install('ntp')
+		self.pkg_install('nova-compute')
+
+
 class SwiftInstaller(Installer):
 	def _setup(self):
 		pass
@@ -342,13 +358,21 @@ class SwiftInstaller(Installer):
 		# TODO: swift는 나중에 처리한다..
 
 def main():
+	opts, args = getopt.getopt(sys.argv[1:], "", [])
+
 	runner = Runner(Context())
-	runner.append(OsInstaller())
-	runner.append(DatabaseInstaller())
-	runner.append(KeystoneInstaller())
-	runner.append(GlanceInstaller())
-	runner.append(NovaInstaller())
-	runner.append(SwiftInstaller())
+
+	if len(args) == 0:
+		# controller
+		runner.append(OsInstaller())
+		runner.append(DatabaseInstaller())
+		runner.append(KeystoneInstaller())
+		runner.append(GlanceInstaller())
+		runner.append(NovaInstaller())
+		runner.append(SwiftInstaller())
+	else:
+		if args[0] == 'node':
+			runner.append(NovaNodeInstaller())
 	runner.run()
 
 
