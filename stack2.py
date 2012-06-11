@@ -53,10 +53,10 @@ class Installer:
 			return False
 
 	def pkg_remove(self, pkg):
-		self.shell("apt-get purge %s -y" % pkg)
+		self.shell("apt-get purge -y %s" % pkg)
 
 	def pkg_install(self, pkg):
-		self.shell("apt-get install %s -y" % pkg)
+		self.shell("apt-get install -y %s" % pkg)
 
 	class File:
 		def __init__(self, parent, filename):
@@ -130,6 +130,7 @@ class DatabaseInstaller(Installer):
 class KeystoneInstaller(Installer):
 	def _setup(self):
 		self.pkg_remove("keystone")
+		self.shell('rm -rf /var/lib/keystone')
 		self.pkg_install("keystone")
 
 		try: del os.environ['SERVICE_ENDPOINT']
@@ -265,11 +266,17 @@ class NovaInstaller(Installer):
 		self.pkg_remove('nova-common nova-compute-kvm libvirt-bin')
 		self.pkg_remove('openstack-dashboard')
 
+		try: self.shell('service tgt stop')
+		except: pass
+
+		try: self.shell('vgremove -f nova-volumes')
+		except: pass
 		self.shell('pvremove -ff -y %s' % self.context.volume_dev)
 
 	
 	def _run(self):
-		self.pkg_install('nova-api nova-cert nova-compute nova-compute-kvm nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
+		self.pkg_install('nova-api nova-cert nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
+		#self.pkg_install('nova-compute')
 
 		f = self.file('/etc/nova/nova.conf')
 		#f.append('--dhcpbridge_flagfile=/etc/nova/nova.conf')
@@ -343,7 +350,8 @@ class NovaInstaller(Installer):
 		#export OS_PASSWORD=admin
 		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
 
-		self.shell("service libvirt-bin restart && service nova-network restart && service nova-compute restart && service nova-api restart && service nova-objectstore restart && service nova-scheduler restart && service nova-volume restart && service nova-consoleauth restart")
+		self.shell("service libvirt-bin restart && service nova-network restart && service nova-api restart && service nova-objectstore restart && service nova-scheduler restart && service nova-volume restart && service nova-consoleauth restart")
+		#self.shell('service nova-compute restart')
 
 		self.pkg_install('openstack-dashboard')
 		self.shell('service apache2 restart')
@@ -429,11 +437,12 @@ class NovaNodeInstaller(Installer):
 
 class SwiftInstaller(Installer):
 	def _setup(self):
-		pass
+		self.pkg_remove('swift swift-proxy swift-account swift-container swift-object')
+		self.pkg_remove('xfsprogs')
 	
 	def _run(self):
 		self.pkg_install('swift swift-proxy swift-account swift-container swift-object')
-		self.pkg_install('xfsprogs curl python-pastedeploy')
+		self.pkg_install('xfsprogs python-pastedeploy')
 
 		# TODO: swift는 나중에 처리한다..
 
