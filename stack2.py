@@ -365,7 +365,7 @@ class NovaInstaller(Installer):
 		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
 
 		self.shell("service nova-network restart")
-		self.shell("hervice nova-api restart")
+		self.shell("service nova-api restart")
 		self.shell("service nova-objectstore restart")
 		self.shell("service nova-scheduler restart")
 		self.shell("service nova-volume restart")
