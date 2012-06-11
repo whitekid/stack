@@ -17,7 +17,10 @@ class Context:
 	passwd = 'choe'
 	region = 'region0'
 	volume_dev = '/dev/sdb'
-	private_net = '10.200.2.0/27'
+	private_net = '10.200.2.0/24'
+	private_net_size = 256	# ip address의 갯수
+	private_gw = '10.200.2.1'
+	private_dns1 = '168.126.63.1'
 	bridge = 'br100'
 	bridge_iface = 'eth1'
 	control_ip = '10.200.1.10'
@@ -312,10 +315,10 @@ class NovaInstaller(Installer):
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
 		f.append('--public_interface=eth0')
-		f.append('--flat_interface=eth1')
-		f.append('--flat_network_bridge=br100')
-		f.append('--fixed_range=192.168.4.1/27')		# TODO: hmm...
-		f.append('--floating_range=10.10.10.2/27')		# TODO: hmm...
+		f.append('--flat_interface=%s' % self.context.bridge_iface)
+		f.append('--flat_network_bridge=%s' % self.context.bridge)
+		f.append('--fixed_range=10.200.2.0/24')			# TODO: hmm...
+		f.append('--floating_range=10.200.3.0/24')		# TODO: hmm...
 		f.append('--network_size=32')				# TODO: hmm...
 		f.append('--flat_network_dhcp_start=192.168.4.33')	# TODO: hmm...
 		f.append('--flat_injected=False')
@@ -340,8 +343,12 @@ class NovaInstaller(Installer):
 		self.shell('nova-manage db sync')
 
 		# TODO: 여기 정확한 아키텍처 파악 필요
-		self.shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=32' %
-			(self.context.private_net, self.context.bridge, self.context.bridge_iface))
+		# dnsmasq가 아래처럼 동작하고 있다>
+		# /usr/sbin/dnsmasq --strict-order --bind-interfaces --conf-file= --domain=novalocal --pid-file=/var/lib/nova/networks/nova-br100.pid --listen-address=10.200.2.1 --except-interface=lo --dhcp-range=10.200.2.2,static,120s --dhcp-lease-max=32 --dhcp-hostsfile=/var/lib/nova/networks/nova-br100.conf --dhcp-script=/usr/bin/nova-dhcpbridge --leasefile-ro
+		# TODO: private : label
+		# TODO: 소스를 보자 https://github.com/openstack/nova/blob/master/bin/nova-manage
+		self.shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s --dns1 %s --gateway %s' %
+			(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size, self.context.private_dns1, self.context.private_gw))
 
 		# 이전과 비슷
 		#export OS_TENANT_NAME=admin
