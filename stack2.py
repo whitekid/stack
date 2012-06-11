@@ -268,7 +268,7 @@ class GlanceInstaller(Installer):
 
 class NovaInstaller(Installer):
 	def _setup(self):
-		self.pkg_remove('nova-common nova-compute-kvm libvirt-bin')
+		self.pkg_remove('nova-common')
 		self.pkg_remove('openstack-dashboard')
 
 		try: self.shell('service tgt stop')
@@ -359,7 +359,7 @@ class NovaInstaller(Installer):
 		#export OS_PASSWORD=admin
 		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
 
-		self.shell("service libvirt-bin restart && service nova-network restart && service nova-api restart && service nova-objectstore restart && service nova-scheduler restart && service nova-volume restart && service nova-consoleauth restart")
+		self.shell("service nova-network restart && service nova-api restart && service nova-objectstore restart && service nova-scheduler restart && service nova-volume restart && service nova-consoleauth restart")
 		#self.shell('service nova-compute restart')
 
 		self.pkg_install('openstack-dashboard')
@@ -480,3 +480,5 @@ def main():
 
 
 main()
+
+# vim: aw ai nu
