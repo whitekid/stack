@@ -23,6 +23,7 @@ class Context:
 	private_net_size = 256	# ip address의 갯수
 	private_gw = '10.200.2.1'
 	private_dns1 = '168.126.63.1'
+	private_dhcp_start = '10.200.2.10'
 	bridge = 'br100'
 	bridge_iface = 'eth1'
 	control_ip = '10.200.1.10'
@@ -320,10 +321,10 @@ class NovaInstaller(Installer):
 		f.append('--public_interface=eth0')
 		f.append('--flat_interface=%s' % self.context.bridge_iface)
 		f.append('--flat_network_bridge=%s' % self.context.bridge)
-		f.append('--fixed_range=10.200.2.0/24')			# TODO: hmm...
-		f.append('--floating_range=10.200.3.0/24')		# TODO: hmm...
-		f.append('--network_size=32')				# TODO: hmm...
-		f.append('--flat_network_dhcp_start=192.168.4.33')	# TODO: hmm...
+		f.append('--fixed_range=%s' % self.context.private_net)
+		#f.append('--floating_range=10.200.3.0/24')		# TODO: public ip range인데 아직은 고려하지 않음
+		f.append('--network_size=%s' % self.context.private_net_size)				# TODO: hmm...
+		f.append('--flat_network_dhcp_start=%s' % self.context.private_dhcp_start)	# TODO: hmm...
 		f.append('--flat_injected=False')
 		#f.append('--force_dhcp_release')
 		#f.append('--iscsi_helper=tgtadm')
@@ -375,10 +376,10 @@ class NovaNodeInstaller(Installer):
 	def _setup(self):
 		if not self.pkg_installed('ntp'): self.pkg_remove('ntp')
 		if not self.pkg_installed('nova-common'): self.pkg_remove('nova-common')
-		self.shell('kvm-ok')
 
 	def _run_compute(self):
 		self.pkg_install('nova-compute')
+		self.shell('kvm-ok')
 
 		f = self.file('/etc/nova/nova.conf')
 		#f.append('--dhcpbridge_flagfile=/etc/nova/nova.conf')
@@ -395,7 +396,7 @@ class NovaNodeInstaller(Installer):
 		f.append('--rabbit_host=%s' % self.context.control_ip)
 		f.append('--cc_host=%s' % self.context.control_ip)
 		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.control_ip)
-		f.append('--routing_source_ip=%s' % self.context.guest_gw)	# guest router
+		f.append('--routing_source_ip=%s' % self.context.private_gw)	# guest router?
 		f.append('--glance_api_servers=%s:9292' % self.context.control_ip)
 		f.append('--image_service=nova.image.glance.GlanceImageService')
 		f.append('--iscsi_ip_prefix=10.200.1')
@@ -415,12 +416,12 @@ class NovaNodeInstaller(Installer):
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
 		f.append('--public_interface=eth0')
-		f.append('--flat_interface=eth1')
-		f.append('--flat_network_bridge=br100')
-		f.append('--fixed_range=192.168.4.1/27')		# TODO: hmm...
-		f.append('--floating_range=10.10.10.2/27')		# TODO: hmm...
-		f.append('--network_size=32')				# TODO: hmm...
-		f.append('--flat_network_dhcp_start=192.168.4.33')	# TODO: hmm...
+		f.append('--flat_interface=%s' % self.context.bridge_iface)
+		f.append('--flat_network_bridge=%s' % self.context.bridge)
+		f.append('--fixed_range=%s' % self.context.private_net)
+		#f.append('--floating_range=10.10.10.2/27')		# TODO: hmm...
+		f.append('--network_size=%s' % self.context.private_net_size)				# TODO: hmm...
+		f.append('--flat_network_dhcp_start=%s' % self.context.private_dhcp_start)	# TODO: hmm...
 		f.append('--flat_injected=False')
 		#f.append('--force_dhcp_release')
 		#f.append('--iscsi_helper=tgtadm')
@@ -472,6 +473,10 @@ def main():
 		runner.append(SwiftInstaller())
 	elif mac in context.node_mac:
 		runner.append(NovaNodeInstaller())
+		# wget http://ftp.daum.net/ubuntu-releases/12.04/ubuntu-12.04-server-amd64.iso
+		# kvm-img create -f qcow2 server.img 5G
+		# sudo kvm -m 256 -cdrom ubuntu-12.04-server-amd64.iso -drive file=server.img,if=virtio,index=0 -boot d -net nic -net user -nographic  -vnc :0
+		# install ubuntu sever using gvncviewr <ip>:0
 		# glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < server.img
 	else:
 		raise Exception, 'Unknown mac %s' % mac
