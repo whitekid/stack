@@ -261,14 +261,14 @@ class GlanceInstaller(Installer):
 
 class NovaInstaller(Installer):
 	def _setup(self):
-		self.pkg_remove('nova-common nova-compute-kvm')
+		self.pkg_remove('nova-common')
 		self.pkg_remove('openstack-dashboard')
 
 		self.shell('pvremove -ff -y %s' % self.context.volume_dev)
 
 	
 	def _run(self):
-		self.pkg_install('nova-api nova-cert nova-compute nova-compute-kvm nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
+		self.pkg_install('nova-api nova-cert nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
 
 		f = self.file('/etc/nova/nova.conf')
 		#f.append('--dhcpbridge_flagfile=/etc/nova/nova.conf')
@@ -342,7 +342,7 @@ class NovaInstaller(Installer):
 		#export OS_PASSWORD=admin
 		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
 
-		self.shell("service libvirt-bin restart && service nova-network restart && service nova-compute restart && service nova-api restart && service nova-objectstore restart && service nova-scheduler restart && service nova-volume restart && service nova-consoleauth restart")
+		self.shell("service libvirt-bin restart && service nova-network restart && service nova-api restart && service nova-objectstore restart && service nova-scheduler restart && service nova-volume restart && service nova-consoleauth restart")
 
 		self.pkg_install('openstack-dashboard')
 		self.shell('service apache2 restart')
