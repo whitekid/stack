@@ -19,8 +19,8 @@ class Context:
 	passwd = 'choe'
 	region = 'region0'
 	volume_dev = '/dev/sdb'
-	private_net = '10.200.2.0/24'
-	private_net_size = 256	# ip address의 갯수
+	private_net = '10.200.2.32/27'
+	private_net_size = 32	# ip address의 갯수
 	private_gw = '10.200.2.1'
 	private_dns1 = '168.126.63.1'
 	bridge = 'br100'
@@ -270,6 +270,7 @@ class NovaInstaller(Installer):
 	def _setup(self):
 		self.pkg_remove('nova-common')
 		self.pkg_remove('openstack-dashboard')
+		self.pkg_remove('dnsmasq-base')
 
 		try: self.shell('service tgt stop')
 		except: pass
@@ -350,8 +351,11 @@ class NovaInstaller(Installer):
 		# /usr/sbin/dnsmasq --strict-order --bind-interfaces --conf-file= --domain=novalocal --pid-file=/var/lib/nova/networks/nova-br100.pid --listen-address=10.200.2.1 --except-interface=lo --dhcp-range=10.200.2.2,static,120s --dhcp-lease-max=32 --dhcp-hostsfile=/var/lib/nova/networks/nova-br100.conf --dhcp-script=/usr/bin/nova-dhcpbridge --leasefile-ro
 		# TODO: private : label
 		# TODO: 소스를 보자 https://github.com/openstack/nova/blob/master/bin/nova-manage
-		self.shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s --dns1 %s --gateway %s' %
-			(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size, self.context.private_dns1, self.context.private_gw))
+		# TODO: DHCP Server가 10.200.2.1로 들어가고 있음. compute-nod의 /var/lib/nova/instances/instance-00000002/libvirt.xml 를 확인...
+		#self.shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s --dns1 %s --gateway %s' %
+		#	(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size, self.context.private_dns1, self.context.private_gw))
+		self.shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s' %
+			(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size))
 
 		# 이전과 비슷
 		#export OS_TENANT_NAME=admin
