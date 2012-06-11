@@ -20,6 +20,7 @@ class Context:
 	private_net = '10.200.2.0/27'
 	bridge = 'br100'
 	bridge_iface = 'eth1'
+	control_ip = '10.200.1.10'
 
 	def __init__(self):
 		self.hostname = subprocess.check_output('hostname').strip()
@@ -357,9 +358,71 @@ class NovaNodeInstaller(Installer):
 		if not self.pkg_installed('ntp'): self.pkg_remove('ntp')
 		if not self.pkg_installed('nova-compute'): self.pkg_remove('nova-compute')
 
+	def _run_compute(self):
+		self.pkg_install('nova-compute')
+
+		f = self.file('/etc/nova/nova.conf')
+		#f.append('--dhcpbridge_flagfile=/etc/nova/nova.conf')
+		#f.append('--dhcpbridge=/usr/bin/nova-dhcpbridge')
+		#f.append('--logdir=/var/log/nova')
+		#f.append('--state_path=/var/lib/nova')
+		#f.append('--lock_path=/run/lock/nova')
+		f.append('--allow_admin_api=true')
+		f.append('--use_deprecated_auth=false')
+		f.append('--auth_strategy=keystone')
+		f.append('--scheduler_driver=nova.scheduler.simple.SimpleScheduler')
+		f.append('--s3_host=%s' % self.context.control_ip)
+		f.append('--ec2_host=%s' % self.context.control_ip)
+		f.append('--rabbit_host=%s' % self.context.control_ip)
+		f.append('--cc_host=%s' % self.context.control_ip)
+		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.control_ip)
+		f.append('--routing_source_ip=%s' % self.context.control_ip)
+		f.append('--glance_api_servers=%s:9292' % self.context.control_ip)
+		f.append('--image_service=nova.image.glance.GlanceImageService')
+		f.append('--iscsi_ip_prefix=192.168.4')
+		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.control_ip))
+		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.control_ip)
+		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.control_ip)
+		f.append('--api_paste_config=/etc/nova/api-paste.ini')
+		f.append('--libvirt_type=kvm')
+		#f.append('--libvirt_use_virtio_for_bridges=true')
+		f.append('--start_guests_on_host_boot=true')
+		f.append('--resume_guests_state_on_host_boot=true')
+		# vnc specific configuration
+		f.append('--novnc_enabled=true')
+		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.control_ip)
+		f.append('--vncserver_proxyclient_address=%s' % self.context.control_ip)
+		f.append('--vncserver_listen=%s' % self.context.control_ip)
+		# network specific settings
+		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
+		f.append('--public_interface=eth0')
+		f.append('--flat_interface=eth1')
+		f.append('--flat_network_bridge=br100')
+		f.append('--fixed_range=192.168.4.1/27')		# TODO: hmm...
+		f.append('--floating_range=10.10.10.2/27')		# TODO: hmm...
+		f.append('--network_size=32')				# TODO: hmm...
+		f.append('--flat_network_dhcp_start=192.168.4.33')	# TODO: hmm...
+		f.append('--flat_injected=False')
+		#f.append('--force_dhcp_release')
+		#f.append('--iscsi_helper=tgtadm')
+		#f.append('--connection_type=libvirt')
+		#f.append('--root_helper=sudo nova-rootwrap')
+		#f.append('--verbose')
+
+		self.shell('chown -R nova:nova /etc/nova')
+		self.shell('chmod 644 /etc/nova/nova.conf')
+
+		self.file('/etc/nova/api-paste.ini').replace(
+			'%SERVICE_TENANT_NAME%', 'service').replace(
+			'%SERVICE_USER%', 'nova').replace(
+			'%SERVICE_PASSWORD%', self.context.passwd)
+
+		self.shell('service nova-compute restart')
+		self.shell('nova-manage service list')
+
 	def _run(self):
 		self.pkg_install('ntp')
-		self.pkg_install('nova-compute')
+		self._run_compute()
 
 
 class SwiftInstaller(Installer):
@@ -373,6 +436,8 @@ class SwiftInstaller(Installer):
 		# TODO: swift는 나중에 처리한다..
 
 def main():
+	if os.getuid() != 0: raise Exception, 'root required'
+
 	runner = Runner(Context())
 
 	mac = get_mac()
