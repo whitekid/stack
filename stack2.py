@@ -17,7 +17,8 @@ class Context:
 	passwd = 'choe'
 	region = 'region0'
 	volume_dev = '/dev/sdb'
-	private_net = '10.200.2.0/27'
+	guest_net = '10.200.2.0/27'
+	guest_gw = '100.200.2.2'
 	bridge = 'br100'
 	bridge_iface = 'eth1'
 	control_ip = '10.200.1.10'
@@ -261,7 +262,7 @@ class GlanceInstaller(Installer):
 
 class NovaInstaller(Installer):
 	def _setup(self):
-		self.pkg_remove('nova-common nova-compute-kvm')
+		self.pkg_remove('nova-common nova-compute-kvm libvirt-bin')
 		self.pkg_remove('openstack-dashboard')
 
 		self.shell('pvremove -ff -y %s' % self.context.volume_dev)
@@ -334,7 +335,7 @@ class NovaInstaller(Installer):
 
 		# TODO: 여기 정확한 아키텍처 파악 필요
 		self.shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=32' %
-			(self.context.private_net, self.context.bridge, self.context.bridge_iface))
+			(self.context.guest_net, self.context.bridge, self.context.bridge_iface))
 
 		# 이전과 비슷
 		#export OS_TENANT_NAME=admin
@@ -352,11 +353,12 @@ class NovaNodeInstaller(Installer):
 	"""Nova Computing Node
 	Assumtions:
 		- eth0: management network
-		- eth1: private network
+		- eth1: guest network
 	"""
 	def _setup(self):
 		if not self.pkg_installed('ntp'): self.pkg_remove('ntp')
-		if not self.pkg_installed('nova-compute'): self.pkg_remove('nova-compute')
+		if not self.pkg_installed('nova-common'): self.pkg_remove('nova-common')
+		self.shell('kvm-ok')
 
 	def _run_compute(self):
 		self.pkg_install('nova-compute')
@@ -376,10 +378,10 @@ class NovaNodeInstaller(Installer):
 		f.append('--rabbit_host=%s' % self.context.control_ip)
 		f.append('--cc_host=%s' % self.context.control_ip)
 		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.control_ip)
-		f.append('--routing_source_ip=%s' % self.context.control_ip)
+		f.append('--routing_source_ip=%s' % self.context.guest_gw)	# guest router
 		f.append('--glance_api_servers=%s:9292' % self.context.control_ip)
 		f.append('--image_service=nova.image.glance.GlanceImageService')
-		f.append('--iscsi_ip_prefix=192.168.4')
+		f.append('--iscsi_ip_prefix=10.200.1')
 		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.control_ip))
 		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.control_ip)
 		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.control_ip)
