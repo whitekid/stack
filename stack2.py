@@ -19,8 +19,8 @@ class Context:
 	passwd = 'choe'
 	region = 'region0'
 	volume_dev = '/dev/sdb'
-	private_net = '10.200.2.32/27'
-	private_net_size = 32	# ip address의 갯수
+	private_net = '10.200.2.0/24'
+	private_net_size = 256	# ip address의 갯수
 	private_gw = '10.200.2.1'
 	private_dns1 = '168.126.63.1'
 	private_dhcp_start = '10.200.2.10'
@@ -364,7 +364,12 @@ class NovaInstaller(Installer):
 		#export OS_PASSWORD=admin
 		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
 
-		self.shell("service nova-network restart && service nova-api restart && service nova-objectstore restart && service nova-scheduler restart && service nova-volume restart && service nova-consoleauth restart")
+		self.shell("service nova-network restart")
+		self.shell("hervice nova-api restart")
+		self.shell("service nova-objectstore restart")
+		self.shell("service nova-scheduler restart")
+		self.shell("service nova-volume restart")
+		self.shell("service nova-consoleauth restart")
 		#self.shell('service nova-compute restart')
 
 		self.pkg_install('openstack-dashboard')
