@@ -38,9 +38,14 @@ class Installer:
 		return subprocess.check_output(command, shell=True)
 		
 
+	def pkg_installed(self, pkg):
+		try:
+			return self.output("dpkg -l  | grep '%s ' | grep -c ^ii" % pkg) == '1'
+		except:
+			return False
+
 	def pkg_remove(self, pkg):
-		try: self.shell("apt-get purge %s -y" % pkg)
-		except: pass
+		self.shell("apt-get purge %s -y" % pkg)
 
 	def pkg_install(self, pkg):
 		self.shell("apt-get install %s -y" % pkg)
@@ -88,6 +93,10 @@ class OsInstaller(Installer):
 
 class DatabaseInstaller(Installer):
 	def _setup(self):
+		if self.pkg_installed('mysql-server'):
+			self.pkg_remove('mysql-server')
+		self.pkg_install('mysql-server')
+
 		try: self.shell("service mysql stop")
 		except: pass
 		self.shell("sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/my.cnf")
