@@ -4,7 +4,14 @@ import os, sys
 import subprocess
 import json
 import time
-import getopt
+
+def get_ip(iface = None):
+	if iface == None: iface = 'eth0'
+	return subprocess.check_output("ifconfig %s | grep 'inet addr' | cut -d: -f 2 | awk '{print $1}'" % iface, shell=True).strip()
+
+def get_mac(iface = None):
+	if iface == None: iface = 'eth0'
+	return subprocess.check_output("ifconfig %s | grep HWaddr | awk '{print $5}'" % iface, shell=True).strip()
 
 class Context:
 	passwd = 'choe'
@@ -16,10 +23,9 @@ class Context:
 
 	def __init__(self):
 		self.hostname = subprocess.check_output('hostname').strip()
-		# eth0: public
-		# eth1: private
-		self.ip_eth0 = subprocess.check_output("ifconfig eth0 | grep 'inet addr' | cut -d: -f 2 | awk '{print $1}'", shell=True).strip()
-		self.ip_eth1 = subprocess.check_output("ifconfig eth1 | grep 'inet addr' | cut -d: -f 2 | awk '{print $1}'", shell=True).strip()
+
+	def get_ip(self, iface = None): return get_ip(iface)
+	def get_mac(self, iface = None): return get_mac(iface)
 
 class Installer:
 	def run(self):
@@ -166,9 +172,9 @@ class KeystoneInstaller(Installer):
 		def endpoint_create(service_name, publicurl, adminurl, internalurl):
 			region = self.context.region
 			service_id = self.get_service_id(service_name)
-			publicurl = publicurl % {'ip': self.context.ip_eth0}
-			adminurl = adminurl % {'ip': self.context.ip_eth0}
-			internalurl = internalurl % {'ip': self.context.ip_eth0}
+			publicurl = publicurl % {'ip': self.context.get_ip('eth0')}
+			adminurl = adminurl % {'ip': self.context.get_ip('eth0')}
+			internalurl = internalurl % {'ip': self.context.get_ip('eth0')}
 
 			self.shell(
 				"keystone endpoint-create --region %(region)s --service_id %(service_id)s "
@@ -264,18 +270,18 @@ class NovaInstaller(Installer):
 		f.append('--use_deprecated_auth=false')
 		f.append('--auth_strategy=keystone')
 		f.append('--scheduler_driver=nova.scheduler.simple.SimpleScheduler')
-		f.append('--s3_host=%s' % self.context.ip_eth0)
-		f.append('--ec2_host=%s' % self.context.ip_eth0)
-		f.append('--rabbit_host=%s' % self.context.ip_eth0)
-		f.append('--cc_host=%s' % self.context.ip_eth0)
-		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.ip_eth0)
-		f.append('--routing_source_ip=%s' % self.context.ip_eth0)
-		f.append('--glance_api_servers=%s:9292' % self.context.ip_eth0)
+		f.append('--s3_host=%s' % self.context.get_ip('eth0'))
+		f.append('--ec2_host=%s' % self.context.get_ip('eth0'))
+		f.append('--rabbit_host=%s' % self.context.get_ip('eth0'))
+		f.append('--cc_host=%s' % self.context.get_ip('eth0'))
+		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.get_ip('eth0'))
+		f.append('--routing_source_ip=%s' % self.context.get_ip('eth0'))
+		f.append('--glance_api_servers=%s:9292' % self.context.get_ip('eth0'))
 		f.append('--image_service=nova.image.glance.GlanceImageService')
 		f.append('--iscsi_ip_prefix=192.168.4')
-		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.ip_eth0))
-		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.ip_eth0)
-		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.ip_eth0)
+		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.get_ip('eth0')))
+		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.get_ip('eth0'))
+		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.get_ip('eth0'))
 		f.append('--api_paste_config=/etc/nova/api-paste.ini')
 		f.append('--libvirt_type=kvm')
 		#f.append('--libvirt_use_virtio_for_bridges=true')
@@ -283,9 +289,9 @@ class NovaInstaller(Installer):
 		f.append('--resume_guests_state_on_host_boot=true')
 		# vnc specific configuration
 		f.append('--novnc_enabled=true')
-		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.ip_eth0)
-		f.append('--vncserver_proxyclient_address=%s' % self.context.ip_eth0)
-		f.append('--vncserver_listen=%s' % self.context.ip_eth0)
+		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.get_ip('eth0'))
+		f.append('--vncserver_proxyclient_address=%s' % self.context.get_ip('eth0'))
+		f.append('--vncserver_listen=%s' % self.context.get_ip('eth0'))
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
 		f.append('--public_interface=eth0')
@@ -358,11 +364,10 @@ class SwiftInstaller(Installer):
 		# TODO: swift는 나중에 처리한다..
 
 def main():
-	opts, args = getopt.getopt(sys.argv[1:], "", [])
-
 	runner = Runner(Context())
 
-	if len(args) == 0:
+	mac = get_mac()
+	if mac == '00:0c:29:6a:64:33':
 		# controller
 		runner.append(OsInstaller())
 		runner.append(DatabaseInstaller())
@@ -370,9 +375,12 @@ def main():
 		runner.append(GlanceInstaller())
 		runner.append(NovaInstaller())
 		runner.append(SwiftInstaller())
-	else:
+	elif mac == '00:0c:29:d5:16:5f':
 		if args[0] == 'node':
 			runner.append(NovaNodeInstaller())
+	else:
+		raise Exception, 'Unknown mac %s' % mac
+
 	runner.run()
 
 
