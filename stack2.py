@@ -14,6 +14,8 @@ def get_mac(iface = None):
 	return subprocess.check_output("ifconfig %s | grep HWaddr | awk '{print $5}'" % iface, shell=True).strip()
 
 class Context:
+	control_mac = ['00:0c:29:6a:64:33']
+	node_mac = ['00:0c:29:d5:16:5f']
 	passwd = 'choe'
 	region = 'region0'
 	volume_dev = '/dev/sdb'
@@ -22,6 +24,7 @@ class Context:
 	bridge = 'br100'
 	bridge_iface = 'eth1'
 	control_ip = '10.200.1.10'
+
 
 	def __init__(self):
 		self.hostname = subprocess.check_output('hostname').strip()
@@ -449,10 +452,11 @@ class SwiftInstaller(Installer):
 def main():
 	if os.getuid() != 0: raise Exception, 'root required'
 
-	runner = Runner(Context())
+	context = Context()
+	runner = Runner(context)
 
 	mac = get_mac()
-	if mac == '00:0c:29:6a:64:33':
+	if mac in context.control_mac:
 		# controller
 		runner.append(OsInstaller())
 		runner.append(DatabaseInstaller())
@@ -460,8 +464,9 @@ def main():
 		runner.append(GlanceInstaller())
 		runner.append(NovaInstaller())
 		runner.append(SwiftInstaller())
-	elif mac == '00:0c:29:d5:16:5f':
+	elif mac in context.node_mac:
 		runner.append(NovaNodeInstaller())
+		# glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < server.img
 	else:
 		raise Exception, 'Unknown mac %s' % mac
 
