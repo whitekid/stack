@@ -354,8 +354,8 @@ class NovaNodeInstaller(Installer):
 		- eth1: private network
 	"""
 	def _setup(self):
-		self.pkg_remove('ntp')
-		self.pkg_remove('nova-compute')
+		if not self.pkg_installed('ntp'): self.pkg_remove('ntp')
+		if not self.pkg_installed('nova-compute'): self.pkg_remove('nova-compute')
 
 	def _run(self):
 		self.pkg_install('ntp')
@@ -385,8 +385,7 @@ def main():
 		runner.append(NovaInstaller())
 		runner.append(SwiftInstaller())
 	elif mac == '00:0c:29:d5:16:5f':
-		if args[0] == 'node':
-			runner.append(NovaNodeInstaller())
+		runner.append(NovaNodeInstaller())
 	else:
 		raise Exception, 'Unknown mac %s' % mac
 
