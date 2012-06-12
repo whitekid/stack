@@ -498,7 +498,7 @@ def main():
 		runner.append(KeystoneInstaller())
 		runner.append(GlanceInstaller())
 		runner.append(NovaControllerInstaller())
-		runner.append(NovaComputeInstaller())
+		#runner.append(NovaComputeInstaller())
 		runner.append(SwiftInstaller())
 		runner.append(PrepareImageInstaller())
 		#runner.append(PrepareInstanceInstaller())
