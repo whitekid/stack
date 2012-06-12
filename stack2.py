@@ -502,7 +502,7 @@ def main():
 		runner.append(PrepareImageInstaller())
 		runner.append(PrepareInstanceInstaller())
 	elif mac in context.node_mac:
-		runner.append(NovaNodeInstaller())
+		runner.append(NovaComputeInstaller())
 	else:
 		raise Exception, 'Unknown mac %s' % mac
 
