@@ -5,14 +5,6 @@ import subprocess
 import json
 import time
 
-def get_ip(iface = None):
-	if iface == None: iface = 'eth0'
-	return subprocess.check_output("ifconfig %s | grep 'inet addr' | cut -d: -f 2 | awk '{print $1}'" % iface, shell=True).strip()
-
-def get_mac(iface = None):
-	if iface == None: iface = 'eth0'
-	return subprocess.check_output("ifconfig %s | grep HWaddr | awk '{print $5}'" % iface, shell=True).strip()
-
 class Context:
 	control_mac = ['00:0c:29:6a:64:33']
 	node_mac = ['00:0c:29:d5:16:5f']
@@ -31,8 +23,38 @@ class Context:
 	def __init__(self):
 		self.hostname = subprocess.check_output('hostname').strip()
 
-	def get_ip(self, iface = None): return get_ip(iface)
-	def get_mac(self, iface = None): return get_mac(iface)
+
+def get_ip(iface = None):
+	if iface == None: iface = 'eth0'
+	return subprocess.check_output("ifconfig %s | grep 'inet addr' | cut -d: -f 2 | awk '{print $1}'" % iface, shell=True).strip()
+
+def get_mac(iface = None):
+	if iface == None: iface = 'eth0'
+	return subprocess.check_output("ifconfig %s | grep HWaddr | awk '{print $5}'" % iface, shell=True).strip()
+
+def shell(command):
+	print command
+	return subprocess.check_call(command, shell=True)
+
+def output(command):
+	print command
+	return subprocess.check_output(command, shell=True)
+	
+def pkg_installed(pkg):
+	try:
+		return output("dpkg -l  | grep '%s ' | grep -c ^ii" % pkg).strip() == '1'
+	except:
+		return False
+
+def pkg_remove(pkg):
+	return shell("apt-get purge -y %s" % pkg)
+
+def pkg_install(pkg):
+	os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
+	try:
+		shell("apt-get install -q -y %s" % pkg)
+	finally:
+		del os.environ['DEBIAN_FRONTEND']
 
 class Installer:
 	def run(self):
@@ -46,30 +68,6 @@ class Installer:
 	def _run(self): pass
 	def _teardown(self): pass
 
-	def shell(self, command):
-		print command
-		return subprocess.check_call(command, shell=True)
-
-	def output(self, command):
-		print command
-		return subprocess.check_output(command, shell=True)
-		
-
-	def pkg_installed(self, pkg):
-		try:
-			return self.output("dpkg -l  | grep '%s ' | grep -c ^ii" % pkg).strip() == '1'
-		except:
-			return False
-
-	def pkg_remove(self, pkg):
-		self.shell("apt-get purge -y %s" % pkg)
-
-	def pkg_install(self, pkg):
-		os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
-		try:
-			self.shell("apt-get install -q -y %s" % pkg)
-		finally:
-			del os.environ['DEBIAN_FRONTEND']
 
 	class File:
 		def __init__(self, parent, filename):
@@ -77,7 +75,7 @@ class Installer:
 			self.filename = filename
 
 		def replace(self, orig, rep):
-			self.parent.shell("sed -i 's/%s/%s/g' %s" % (orig, rep, self.filename))
+			shell("sed -i 's/%s/%s/g' %s" % (orig, rep, self.filename))
 			return self
 
 		def append(self, line):
@@ -113,24 +111,24 @@ class Runner:
 
 class OsInstaller(Installer):
 	def _setup(self):
-		self.pkg_remove('ntp')
+		pkg_remove('ntp')
 
 	def _run(self):
-		self.pkg_install('ntp')
+		pkg_install('ntp')
 
 class DatabaseInstaller(Installer):
 	def _setup(self):
-		self.pkg_remove('mysql-common')
-		self.shell('rm -rf /var/lib/mysql')
+		pkg_remove('mysql-common')
+		shell('rm -rf /var/lib/mysql')
 		
 	def _run(self):
-		self.pkg_install('mysql-server')
-		self.pkg_install('python-mysqldb')
+		pkg_install('mysql-server')
+		pkg_install('python-mysqldb')
 
-		self.shell("sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/my.cnf")
-		self.shell("service mysql restart")
+		shell("sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/my.cnf")
+		shell("service mysql restart")
 
-		self.shell("""mysql -uroot -e "SET PASSWORD=PASSWORD('%s')" """ % self.context.passwd)
+		shell("""mysql -uroot -e "SET PASSWORD=PASSWORD('%s')" """ % self.context.passwd)
 		self.create_db('nova', 'nova')
 		self.create_db('glance', 'glance')
 		self.create_db('keystone', 'keystone')
@@ -139,15 +137,15 @@ class DatabaseInstaller(Installer):
 		passwd = self.context.passwd
 		hostname = self.context.hostname
 
-		self.shell("""mysql -uroot -p%(passwd)s -e "create database %(dbname)s;" """ % locals())
-		self.shell("""mysql -uroot -p%(passwd)s -e "grant all on %(dbname)s.* to %(user)s identified by '%(passwd)s';" """ % locals())
-		self.shell("""mysql -uroot -p%(passwd)s -e "grant all on %(dbname)s.* to %(user)s@localhost identified by '%(passwd)s';" """ % locals())
-		self.shell("""mysql -uroot -p%(passwd)s -e "grant all on %(dbname)s.* to %(user)s@'%(hostname)s' identified by '%(passwd)s';" """ % locals())
+		shell("""mysql -uroot -p%(passwd)s -e "create database %(dbname)s;" """ % locals())
+		shell("""mysql -uroot -p%(passwd)s -e "grant all on %(dbname)s.* to %(user)s identified by '%(passwd)s';" """ % locals())
+		shell("""mysql -uroot -p%(passwd)s -e "grant all on %(dbname)s.* to %(user)s@localhost identified by '%(passwd)s';" """ % locals())
+		shell("""mysql -uroot -p%(passwd)s -e "grant all on %(dbname)s.* to %(user)s@'%(hostname)s' identified by '%(passwd)s';" """ % locals())
 
 class KeystoneInstaller(Installer):
 	def _setup(self):
-		self.pkg_remove("keystone")
-		self.shell('rm -rf /var/lib/keystone')
+		pkg_remove("keystone")
+		shell('rm -rf /var/lib/keystone')
 
 		try: del os.environ['SERVICE_ENDPOINT']
 		except: pass
@@ -155,57 +153,57 @@ class KeystoneInstaller(Installer):
 		except: pass
 
 	def _run(self):
-		self.pkg_install("keystone")
+		pkg_install("keystone")
 		self.replace('/etc/keystone/keystone.conf', 'admin_token = ADMIN', 'admin_token = %s' % self.context.passwd)
 		self.replace('/etc/keystone/keystone.conf',
 			r'connection = sqlite:\/\/\/\/var\/lib\/keystone\/keystone.db', 
 			r'connection = mysql:\/\/keystone:%s@localhost\/keystone' % self.context.passwd)
-		self.shell('restart keystone')
-		self.shell('keystone-manage db_sync')
+		shell('restart keystone')
+		shell('keystone-manage db_sync')
 
 		os.environ['SERVICE_ENDPOINT'] = 'http://localhost:35357/v2.0'
 		os.environ['SERVICE_TOKEN'] = self.context.passwd
 
-		self.shell('keystone tenant-create --name admin --description "Default Tenant"')
-		self.shell('keystone tenant-create --name service --description "Service Tenant"')
+		shell('keystone tenant-create --name admin --description "Default Tenant"')
+		shell('keystone tenant-create --name service --description "Service Tenant"')
 
 		# TODO: tenant_id가 없어도 별 상관 없는 듯..
-		self.shell('keystone user-create --name admin --pass %s' % self.context.passwd)
-		self.shell('keystone user-create --name nova --pass %s' % self.context.passwd)
-		self.shell('keystone user-create --name glance --pass %s' % self.context.passwd)
-		self.shell('keystone user-create --name swift --pass %s' % self.context.passwd)
+		shell('keystone user-create --name admin --pass %s' % self.context.passwd)
+		shell('keystone user-create --name nova --pass %s' % self.context.passwd)
+		shell('keystone user-create --name glance --pass %s' % self.context.passwd)
+		shell('keystone user-create --name swift --pass %s' % self.context.passwd)
 
-		self.shell('keystone role-create --name admin')
-		self.shell('keystone role-create --name member')
+		shell('keystone role-create --name admin')
+		shell('keystone role-create --name member')
 
 		# http://docs.openstack.org/essex/openstack-compute/starter/content/Adding_Roles_to_Users-d1e465.html
 		# TODO: 뭔가... 어떤 user가 어떤 tenant의 어떤 role을 가져야하는지 명확하지 않음...
-		self.shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('admin'), self.get_role_id('admin'), self.get_tenant_id('admin')))
-		self.shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('admin'), self.get_role_id('member'), self.get_tenant_id('admin')))
-		self.shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('nova'), self.get_role_id('admin'), self.get_tenant_id('service')))
-		self.shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('glance'), self.get_role_id('admin'), self.get_tenant_id('service')))
-		self.shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('swift'), self.get_role_id('admin'), self.get_tenant_id('service')))
+		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('admin'), self.get_role_id('admin'), self.get_tenant_id('admin')))
+		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('admin'), self.get_role_id('member'), self.get_tenant_id('admin')))
+		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('nova'), self.get_role_id('admin'), self.get_tenant_id('service')))
+		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('glance'), self.get_role_id('admin'), self.get_tenant_id('service')))
+		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('swift'), self.get_role_id('admin'), self.get_tenant_id('service')))
 
-		self.shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('swift'), self.get_role_id('member'), self.get_tenant_id('admin')))
+		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('swift'), self.get_role_id('member'), self.get_tenant_id('admin')))
 
 		# create servic3
-		self.shell("keystone service-create --name nova --type compute --description 'OpenStack Compute Service'")
-		self.shell("keystone service-create --name volume --type volume --description 'OpenStack Volume Service'")
-		self.shell("keystone service-create --name glance --type image --description 'OpenStack Image Service'")
-		self.shell("keystone service-create --name swift --type object-store --description 'OpenStack Storage Service'")
-		self.shell("keystone service-create --name keystone --type identity --description 'OpenStack Identity Service'")
-		self.shell("keystone service-create --name ec2 --type ec2 --description 'EC2 Service'")
+		shell("keystone service-create --name nova --type compute --description 'OpenStack Compute Service'")
+		shell("keystone service-create --name volume --type volume --description 'OpenStack Volume Service'")
+		shell("keystone service-create --name glance --type image --description 'OpenStack Image Service'")
+		shell("keystone service-create --name swift --type object-store --description 'OpenStack Storage Service'")
+		shell("keystone service-create --name keystone --type identity --description 'OpenStack Identity Service'")
+		shell("keystone service-create --name ec2 --type ec2 --description 'EC2 Service'")
 
 		# endpoints
 		# TODO: 여기 $(tenant_id)s가 다른 곳에서는 %(tenant_id)s인데.. 이거 python 문법 아닌가?
 		def endpoint_create(service_name, publicurl, adminurl, internalurl):
 			region = self.context.region
 			service_id = self.get_service_id(service_name)
-			publicurl = publicurl % {'ip': self.context.get_ip('eth0')}
-			adminurl = adminurl % {'ip': self.context.get_ip('eth0')}
-			internalurl = internalurl % {'ip': self.context.get_ip('eth0')}
+			publicurl = publicurl % {'ip': get_ip('eth0')}
+			adminurl = adminurl % {'ip': get_ip('eth0')}
+			internalurl = internalurl % {'ip': get_ip('eth0')}
 
-			self.shell(
+			shell(
 				"keystone endpoint-create --region %(region)s --service_id %(service_id)s "
 				"--publicurl '%(publicurl)s' --adminurl '%(adminurl)s' --internalurl '%(internalurl)s'" % locals())
 
@@ -222,12 +220,13 @@ class KeystoneInstaller(Installer):
 	def get_service_id(self, name): return self.get_keystone_id('service', name)
 
 	def get_keystone_id(self, service, name):
-		return self.output("keystone %s-list | grep ' %s ' | awk '{print $2}'" % (service, name)).strip()
+		return output("keystone %s-list | grep ' %s ' | awk '{print $2}'" % (service, name)).strip()
 	
 
 class GlanceInstaller(Installer):
 	def _setup(self):
-		self.pkg_remove('glance glance-registry glance-api')
+		pkg_remove('glance glance-registry glance-api')
+		shell('rm -rf /var/lib/glance')
 
 		#del os.environ['SERVICE_TOKEN']
 		#del os.environ['OS_TENANT_NAME']
@@ -237,7 +236,7 @@ class GlanceInstaller(Installer):
 		#del os.environ['SERVICE_ENDPOINT']
 
 	def _run(self):
-		self.pkg_install('glance')
+		pkg_install('glance')
 		self.file('/etc/glance/glance-api-paste.ini').replace(
 			'%SERVICE_TENANT_NAME%', 'service').replace(
 			'%SERVICE_USER%', 'glance').replace(
@@ -261,11 +260,11 @@ class GlanceInstaller(Installer):
 			'[paste_deploy]').append(
 			'flavor = keystone')
 
-		self.shell('glance-manage version_control 0')
-		self.shell('glance-manage db_sync')
+		shell('glance-manage version_control 0')
+		shell('glance-manage db_sync')
 
-		self.shell('restart glance-api')
-		self.shell('restart glance-registry')
+		shell('restart glance-api')
+		shell('restart glance-registry')
 		time.sleep(0.5)	#  완전히 startup하기까지 조금 기다려야...
 
 		os.environ['SERVICE_TOKEN'] = self.context.passwd
@@ -275,8 +274,8 @@ class GlanceInstaller(Installer):
 		os.environ['OS_AUTH_URL'] = "http://localhost:5000/v2.0/"
 		os.environ['SERVICE_ENDPOINT'] = 'http://localhost:35357/v2.0'
 
-		self.shell('glance index')
-		#self.shell('glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://localhost:5000/v2.0 index')
+		shell('glance index')
+		#shell('glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://localhost:5000/v2.0 index')
 
 
 class NovaBaseInstaller(Installer):
@@ -291,18 +290,18 @@ class NovaBaseInstaller(Installer):
 		f.append('--use_deprecated_auth=false')
 		f.append('--auth_strategy=keystone')
 		f.append('--scheduler_driver=nova.scheduler.simple.SimpleScheduler')
-		f.append('--s3_host=%s' % self.context.get_ip('eth0'))
-		f.append('--ec2_host=%s' % self.context.get_ip('eth0'))
-		f.append('--rabbit_host=%s' % self.context.get_ip('eth0'))
-		f.append('--cc_host=%s' % self.context.get_ip('eth0'))
-		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.get_ip('eth0'))
-		f.append('--routing_source_ip=%s' % self.context.get_ip('eth0'))
-		f.append('--glance_api_servers=%s:9292' % self.context.get_ip('eth0'))
+		f.append('--s3_host=%s' % get_ip('eth0'))
+		f.append('--ec2_host=%s' % get_ip('eth0'))
+		f.append('--rabbit_host=%s' % get_ip('eth0'))
+		f.append('--cc_host=%s' % get_ip('eth0'))
+		f.append('--nova_url=http://%s:8774/v1.1/' % get_ip('eth0'))
+		f.append('--routing_source_ip=%s' % get_ip('eth0'))
+		f.append('--glance_api_servers=%s:9292' % get_ip('eth0'))
 		f.append('--image_service=nova.image.glance.GlanceImageService')
 		f.append('--iscsi_ip_prefix=192.168.4')
-		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.get_ip('eth0')))
-		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.get_ip('eth0'))
-		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.get_ip('eth0'))
+		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, get_ip('eth0')))
+		f.append('--ec2_url=http://%s:8773/services/Cloud' % get_ip('eth0'))
+		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % get_ip('eth0'))
 		f.append('--api_paste_config=/etc/nova/api-paste.ini')
 		f.append('--libvirt_type=kvm')
 		#f.append('--libvirt_use_virtio_for_bridges=true')
@@ -310,9 +309,9 @@ class NovaBaseInstaller(Installer):
 		f.append('--resume_guests_state_on_host_boot=true')
 		# vnc specific configuration
 		f.append('--novnc_enabled=true')
-		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.get_ip('eth0'))
-		f.append('--vncserver_proxyclient_address=%s' % self.context.get_ip('eth0'))
-		f.append('--vncserver_listen=%s' % self.context.get_ip('eth0'))
+		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % get_ip('eth0'))
+		f.append('--vncserver_proxyclient_address=%s' % get_ip('eth0'))
+		f.append('--vncserver_listen=%s' % get_ip('eth0'))
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
 		f.append('--public_interface=eth0')
@@ -329,50 +328,52 @@ class NovaBaseInstaller(Installer):
 		#f.append('--root_helper=sudo nova-rootwrap')
 		#f.append('--verbose')
 
-		self.shell('chown -R nova:nova /etc/nova')
-		self.shell('chmod 644 /etc/nova/nova.conf')
+		shell('chown -R nova:nova /etc/nova')
+		shell('chmod 644 /etc/nova/nova.conf')
 
 
 class NovaControllerInstaller(NovaBaseInstaller):
 	"""controller installation"""
 	def _setup(self):
-		self.pkg_remove('nova-common')
+		pkg_remove('nova-common')
 		# volume depends
-		self.pkg_remove('tgt')
-		self.pkg_remove('apache2.2-common')
-		try: self.shell('killall -9 dnsmasq')
+		pkg_remove('tgt')
+		pkg_remove('apache2.2-common')
+		shell('service memcached restart')	# openstack-dashboard에서 사용하는데.. 캐쉬 문제로 에러가 발생하는 경우가 있음
+		try: shell('killall -9 dnsmasq')
 		except: pass
-		try: self.shell('killall -9 kvm')
+		try: shell('killall -9 kvm')
 		except: pass
-		self.pkg_remove('dnsmasq-base')
-		self.pkg_remove('openstack-dashboard')
+		pkg_remove('dnsmasq-base')
+		pkg_remove('openstack-dashboard')
 
-		try: self.shell('service tgt stop')
+		try: shell('service tgt stop')
 		except: pass
 
-		try: self.shell('vgremove -f nova-volumes')
+		try: shell('vgremove -f nova-volumes')
 		except: pass
-		self.shell('pvremove -ff -y %s' % self.context.volume_dev)
+		shell('pvremove -ff -y %s' % self.context.volume_dev)
+		shell('rm -rf /var/lib/nova')
 
 	
 	def _run(self):
-		self.pkg_install('nova-api nova-cert nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
+		pkg_install('nova-api nova-cert nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
 
 		self._setup_nova_config()
 
 		# nova-volumes 이름을 가진 lvm volume group이 있어야한다.
-		self.shell('pvcreate %s' % self.context.volume_dev)
-		self.shell('vgcreate nova-volumes %s' % self.context.volume_dev)
+		shell('pvcreate %s' % self.context.volume_dev)
+		shell('vgcreate nova-volumes %s' % self.context.volume_dev)
 
-		self.shell('chown -R nova:nova /etc/nova')
-		self.shell('chmod 644 /etc/nova/nova.conf')
+		shell('chown -R nova:nova /etc/nova')
+		shell('chmod 644 /etc/nova/nova.conf')
 
 		self.file('/etc/nova/api-paste.ini').replace(
 			'%SERVICE_TENANT_NAME%', 'service').replace(
 			'%SERVICE_USER%', 'nova').replace(
 			'%SERVICE_PASSWORD%', self.context.passwd)
 
-		self.shell('nova-manage db sync')
+		shell('nova-manage db sync')
 
 		# TODO: 여기 정확한 아키텍처 파악 필요
 		# dnsmasq가 아래처럼 동작하고 있다>
@@ -380,9 +381,9 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		# TODO: private : label
 		# TODO: 소스를 보자 https://github.com/openstack/nova/blob/master/bin/nova-manage
 		# TODO: DHCP Server가 10.200.2.1로 들어가고 있음. compute-nod의 /var/lib/nova/instances/instance-00000002/libvirt.xml 를 확인...
-		#self.shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s --dns1 %s --gateway %s' %
+		#shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s --dns1 %s --gateway %s' %
 		#	(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size, self.context.private_dns1, self.context.private_gw))
-		self.shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s' %
+		shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s' %
 			(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size))
 
 		# 이전과 비슷
@@ -391,23 +392,24 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		#export OS_PASSWORD=admin
 		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
 
-		self.shell("service tgt restart")
-		self.shell("service nova-network restart")
-		self.shell("service nova-api restart")
-		self.shell("service nova-objectstore restart")
-		self.shell("service nova-scheduler restart")
-		self.shell("service nova-volume restart")
-		self.shell("service nova-consoleauth restart")
+		shell("service tgt restart")
+		shell("service nova-network restart")
+		shell("service nova-api restart")
+		shell("service nova-objectstore restart")
+		shell("service nova-scheduler restart")
+		shell("service nova-volume restart")
+		shell("service nova-consoleauth restart")
 
-		self.pkg_install('openstack-dashboard')
-		self.shell('service apache2 restart')
+		pkg_install('openstack-dashboard')
+		shell('service apache2 restart')
 
 
 class NovaComputeInstaller(NovaBaseInstaller):
 	"""for nova-compute"""
 	def _setup(self):
 		# compute depends
-		self.pkg_remove('qemu-common libvirt0 open-iscsi')
+		pkg_remove('qemu-common libvirt0 open-iscsi')
+		shell('rm -rf /var/lib/nova/instances')
 
 	def _run(self):
 		# nova-compute의 depens
@@ -415,32 +417,32 @@ class NovaComputeInstaller(NovaBaseInstaller):
 		# libflac8 libjson0 libnspr4 libnss3 libnuma1 libogg0 libpulse0 librados2 librbd1 libsdl1.2debian libsndfile1 libvirt-bin libvirt0 libvorbis0a libvorbisenc2 libxenstore3.0
 		# libxml2-utils libyajl1 msr-tools nova-compute-kvm open-iscsi open-iscsi-utils python-libvirt qemu-common qemu-kvm qemu-utils seabios vgabios
 
-		self.pkg_install('nova-compute')
-		self.shell('kvm-ok')
-		self.pkg_remove('dmidecode')	# 이 패키지가 설치되면 kvm이 서비스가 정상작동하지 않음, 아마 ubuntu vm의 문제일 듯..
-		self.shell('service libvirt-bin restart')
+		pkg_install('nova-compute')
+		shell('kvm-ok')
+		pkg_remove('dmidecode')	# 이 패키지가 설치되면 kvm이 서비스가 정상작동하지 않음, 아마 ubuntu vm의 문제일 듯..
+		shell('service libvirt-bin restart')
 
-		self.pkg_install('ntp')
+		pkg_install('ntp')
 
 		self._setup_nova_config()
 
-		self.shell('service open-iscsi restart')
-		self.shell('service nova-compute restart')
-		self.shell('nova-manage service list')
+		shell('service open-iscsi restart')
+		shell('service nova-compute restart')
+		shell('nova-manage service list')
 
 
 class SwiftInstaller(Installer):
 	def _setup(self):
-		self.pkg_remove('swift swift-proxy swift-account swift-container swift-object')
+		pkg_remove('swift swift-proxy swift-account swift-container swift-object')
 	
 	def _run(self):
 		pass
-		#self.pkg_install('swift swift-proxy swift-account swift-container swift-object')
+		#pkg_install('swift swift-proxy swift-account swift-container swift-object')
 
 		# TODO: swift는 나중에 처리한다..
 
 
-class PrepareInstaller(Installer):
+class PrepareImageInstaller(Installer):
 	def _run(self):
 		# Create glance image
 		#
@@ -453,18 +455,21 @@ class PrepareInstaller(Installer):
 		# $ glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < server.qcow2
 		image = 'ubuntu-12.04.qcow2'
 		if not os.path.exists(image):
-			self.shell('wget -O %s http://192.168.100.108/isos/server.qcow2' % image)
-		self.shell('glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < %s' % image)
+			shell('wget -O %s http://192.168.100.108/isos/server.qcow2' % image)
+		shell('glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < %s' % image)
 
+
+class PrepareInstanceInstaller(Installer):
+	def _run(self):
 		# 테스트용 가상머신 생성
 		flavor = 9999
-		self.shell('nova-manage flavor create --name choe.test.small --memory=512 --cpu=1 --root_gb=5 --ephemeral_gb=100 --flavor %s' % flavor)
-		self.shell('nova-manage service list')
+		shell('nova-manage flavor create --name choe.test.small --memory=512 --cpu=1 --root_gb=5 --ephemeral_gb=100 --flavor %s' % flavor)
+		shell('nova-manage service list')
 
 		def nova_cmd():
 			return 'nova --os_username admin --os_password %s --os_tenant_name admin --os_auth_url=http://localhost:5000/v2.0' % (self.context.passwd)
-		def nova(*args): return self.shell('%s %s' % (nova_cmd(), ' '.join(args)))
-		def get_image(): return self.output("%s image-list| grep ACTIVE | awk '{print $2}'" % (nova_cmd())).strip()
+		def nova(*args): return shell('%s %s' % (nova_cmd(), ' '.join(args)))
+		def get_image(): return output("%s image-list| grep ACTIVE | awk '{print $2}'" % (nova_cmd())).strip()
 		nova('image-list')
 		nova('keypair-add test > test.pem')
 		nova('boot --flavor %s --image %s test' % (flavor, get_image()))
@@ -486,7 +491,8 @@ def main():
 		runner.append(NovaControllerInstaller())
 		runner.append(NovaComputeInstaller())
 		runner.append(SwiftInstaller())
-		runner.append(PrepareInstaller())
+		runner.append(PrepareImageInstaller())
+		runner.append(PrepareInstanceInstaller())
 	elif mac in context.node_mac:
 		runner.append(NovaNodeInstaller())
 	else:
