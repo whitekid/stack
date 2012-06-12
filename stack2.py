@@ -212,9 +212,9 @@ class KeystoneInstaller(Installer):
 		def endpoint_create(service_name, publicurl, adminurl, internalurl):
 			region = self.context.region
 			service_id = self.get_service_id(service_name)
-			publicurl = publicurl % {'ip': get_ip('eth0')}
-			adminurl = adminurl % {'ip': get_ip('eth0')}
-			internalurl = internalurl % {'ip': get_ip('eth0')}
+			publicurl = publicurl % {'ip': self.context.control_ip}
+			adminurl = adminurl % {'ip': self.context.control_ip}
+			internalurl = internalurl % {'ip': self.context.control_ip}
 
 			shell(
 				"keystone endpoint-create --region %(region)s --service_id %(service_id)s "
@@ -303,18 +303,18 @@ class NovaBaseInstaller(Installer):
 		f.append('--use_deprecated_auth=false')
 		f.append('--auth_strategy=keystone')
 		f.append('--scheduler_driver=nova.scheduler.simple.SimpleScheduler')
-		f.append('--s3_host=%s' % get_ip('eth0'))
-		f.append('--ec2_host=%s' % get_ip('eth0'))
-		f.append('--rabbit_host=%s' % get_ip('eth0'))
-		f.append('--cc_host=%s' % get_ip('eth0'))
-		f.append('--nova_url=http://%s:8774/v1.1/' % get_ip('eth0'))
-		f.append('--routing_source_ip=%s' % get_ip('eth0'))
-		f.append('--glance_api_servers=%s:9292' % get_ip('eth0'))
+		f.append('--s3_host=%s' % self.context.control_ip)
+		f.append('--ec2_host=%s' % self.context.control_ip)
+		f.append('--rabbit_host=%s' % self.context.control_ip)
+		f.append('--cc_host=%s' % self.context.control_ip)
+		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.control_ip)
+		f.append('--routing_source_ip=%s' % self.context.control_ip)
+		f.append('--glance_api_servers=%s:9292' % self.context.control_ip)
 		f.append('--image_service=nova.image.glance.GlanceImageService')
 		f.append('--iscsi_ip_prefix=192.168.4')
-		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, get_ip('eth0')))
-		f.append('--ec2_url=http://%s:8773/services/Cloud' % get_ip('eth0'))
-		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % get_ip('eth0'))
+		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.control_ip))
+		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.control_ip)
+		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.control_ip)
 		f.append('--api_paste_config=/etc/nova/api-paste.ini')
 		f.append('--libvirt_type=kvm')
 		#f.append('--libvirt_use_virtio_for_bridges=true')
@@ -322,9 +322,9 @@ class NovaBaseInstaller(Installer):
 		f.append('--resume_guests_state_on_host_boot=true')
 		# vnc specific configuration
 		f.append('--novnc_enabled=true')
-		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % get_ip('eth0'))
-		f.append('--vncserver_proxyclient_address=%s' % get_ip('eth0'))
-		f.append('--vncserver_listen=%s' % get_ip('eth0'))
+		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.control_ip)
+		f.append('--vncserver_proxyclient_address=%s' % self.context.control_ip)
+		f.append('--vncserver_listen=%s' % self.context.control_ip)
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
 		f.append('--public_interface=eth0')
@@ -426,6 +426,7 @@ class NovaComputeInstaller(NovaBaseInstaller):
 		# libxml2-utils libyajl1 msr-tools nova-compute-kvm open-iscsi open-iscsi-utils python-libvirt qemu-common qemu-kvm qemu-utils seabios vgabios
 
 		pkg_install('nova-compute')
+		pkg_install('python-mysqldb')
 		shell('kvm-ok')
 		pkg_remove('dmidecode')	# 이 패키지가 설치되면 kvm이 서비스가 정상작동하지 않음, 아마 ubuntu vm의 문제일 듯..
 		shell('service libvirt-bin restart')
@@ -500,9 +501,10 @@ def main():
 		runner.append(NovaComputeInstaller())
 		runner.append(SwiftInstaller())
 		runner.append(PrepareImageInstaller())
-		runner.append(PrepareInstanceInstaller())
+		#runner.append(PrepareInstanceInstaller())
 	elif mac in context.node_mac:
 		runner.append(NovaComputeInstaller())
+		runner.append(PrepareInstanceInstaller())
 	else:
 		raise Exception, 'Unknown mac %s' % mac
 
