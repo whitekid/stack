@@ -36,6 +36,12 @@ def shell(command):
 	print command
 	return subprocess.check_call(command, shell=True)
 
+def try_shell(command):
+	try:
+		return shell(command)
+	except:
+		return 999
+
 def output(command):
 	print command
 	return subprocess.check_output(command, shell=True)
@@ -122,6 +128,9 @@ class DatabaseInstaller(Installer):
 		shell('rm -rf /var/lib/mysql')
 		
 	def _run(self):
+		shell("'mysql-server-5.5 mysql-server/root_password password %s' | debconf-set-selections" % self.context.passwd)
+		shell("'mysql-server-5.5 mysql-server/root_password_again password %s' | debconf-set-selections" % self.context.passwd)
+
 		pkg_install('mysql-server')
 		pkg_install('python-mysqldb')
 
@@ -226,7 +235,7 @@ class KeystoneInstaller(Installer):
 class GlanceInstaller(Installer):
 	def _setup(self):
 		pkg_remove('glance glance-registry glance-api')
-		shell('rm -rf /var/lib/glance')
+		#shell('rm -rf /var/lib/glance')
 
 		#del os.environ['SERVICE_TOKEN']
 		#del os.environ['OS_TENANT_NAME']
@@ -339,19 +348,15 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		# volume depends
 		pkg_remove('tgt')
 		pkg_remove('apache2.2-common')
-		shell('service memcached restart')	# openstack-dashboard에서 사용하는데.. 캐쉬 문제로 에러가 발생하는 경우가 있음
-		try: shell('killall -9 dnsmasq')
-		except: pass
-		try: shell('killall -9 kvm')
-		except: pass
+		try_shell('service memcached restart')	# openstack-dashboard에서 사용하는데.. 캐쉬 문제로 에러가 발생하는 경우가 있음
+		try_shell('killall -9 dnsmasq')
+		try_shell('killall -9 kvm')
 		pkg_remove('dnsmasq-base')
 		pkg_remove('openstack-dashboard')
 
-		try: shell('service tgt stop')
-		except: pass
+		try_shell('service tgt stop')
 
-		try: shell('vgremove -f nova-volumes')
-		except: pass
+		try_shell('vgremove -f nova-volumes')
 		shell('pvremove -ff -y %s' % self.context.volume_dev)
 		shell('rm -rf /var/lib/nova')
 
