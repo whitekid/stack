@@ -324,7 +324,7 @@ class NovaBaseInstaller(Installer):
 		f.append('--novnc_enabled=true')
 		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.control_ip)
 		f.append('--vncserver_proxyclient_address=%s' % self.context.control_ip)
-		f.append('--vncserver_listen=%s' % self.context.control_ip)
+		f.append('--vncserver_listen=%s' % get_ip('eth0'))
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
 		f.append('--public_interface=eth0')
@@ -417,7 +417,8 @@ class NovaComputeInstaller(NovaBaseInstaller):
 	"""for nova-compute"""
 	def _setup(self):
 		# compute depends
-		pkg_remove('qemu-common libvirt0 open-iscsi')
+		pkg_remove('nova-compute qemu-common libvirt0 open-iscsi')
+		pkg_remove('ntp')	# amqp로 통신하는 것들은 시간이 안맞으면 통신을 하지 못한다 ..
 
 	def _run(self):
 		# nova-compute의 depens
@@ -469,20 +470,26 @@ class PrepareImageInstaller(Installer):
 
 
 class PrepareInstanceInstaller(Installer):
+	def _setup(self):
+		try_shell('nova-manage flavor delete --name choe.test.small')
+
+	def _nova_cmd(self):
+		return 'nova --os_username admin --os_password %s --os_tenant_name admin --os_auth_url=http://%s:35357/v2.0' % (self.context.passwd, self.context.control_ip)
+	def _nova(self, *args): return shell('%s %s' % (self._nova_cmd(), ' '.join(args)))
+
 	def _run(self):
 		# 테스트용 가상머신 생성
 		flavor = 9999
 		shell('nova-manage flavor create --name choe.test.small --memory=512 --cpu=1 --root_gb=5 --ephemeral_gb=100 --flavor %s' % flavor)
 		shell('nova-manage service list')
 
-		def nova_cmd():
-			return 'nova --os_username admin --os_password %s --os_tenant_name admin --os_auth_url=http://localhost:5000/v2.0' % (self.context.passwd)
-		def nova(*args): return shell('%s %s' % (nova_cmd(), ' '.join(args)))
-		def get_image(): return output("%s image-list| grep ACTIVE | awk '{print $2}'" % (nova_cmd())).strip()
-		nova('image-list')
-		nova('keypair-add test > test.pem')
-		nova('boot --flavor %s --image %s test' % (flavor, get_image()))
-		nova('list')
+		def get_image(): return output("%s image-list| grep ACTIVE | awk '{print $2}'" % (self._nova_cmd())).strip()
+		self._nova('image-list')
+		try: self._nova('keypair-delete test')
+		except: pass
+		self._nova('keypair-add test > test.pem')
+		self._nova('boot --flavor %s --image %s test' % (flavor, get_image()))
+		self._nova('list')
 
 def main():
 	if os.getuid() != 0: raise Exception, 'root required'
