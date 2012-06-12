@@ -20,14 +20,13 @@ class Context:
 	region = 'region0'
 	volume_dev = '/dev/sdb'
 	private_net = '10.200.2.0/24'
-	private_net_size = 256	# ip address의 갯수
+	private_net_size = 254	# ip address의 갯수
 	private_gw = '10.200.2.1'
 	private_dns1 = '168.126.63.1'
 	private_dhcp_start = '10.200.2.10'
 	bridge = 'br100'
 	bridge_iface = 'eth1'
 	control_ip = '10.200.1.10'
-
 
 	def __init__(self):
 		self.hostname = subprocess.check_output('hostname').strip()
@@ -41,20 +40,24 @@ class Installer:
 		self._run()
 		self._teardown()
 
+	def setup(self): self._setup()
+
 	def _setup(self): pass
 	def _run(self): pass
 	def _teardown(self): pass
 
 	def shell(self, command):
+		print command
 		return subprocess.check_call(command, shell=True)
 
 	def output(self, command):
+		print command
 		return subprocess.check_output(command, shell=True)
 		
 
 	def pkg_installed(self, pkg):
 		try:
-			return self.output("dpkg -l  | grep '%s ' | grep -c ^ii" % pkg) == '1'
+			return self.output("dpkg -l  | grep '%s ' | grep -c ^ii" % pkg).strip() == '1'
 		except:
 			return False
 
@@ -62,7 +65,11 @@ class Installer:
 		self.shell("apt-get purge -y %s" % pkg)
 
 	def pkg_install(self, pkg):
-		self.shell("apt-get install -y %s" % pkg)
+		os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
+		try:
+			self.shell("apt-get install -q -y %s" % pkg)
+		finally:
+			del os.environ['DEBIAN_FRONTEND']
 
 	class File:
 		def __init__(self, parent, filename):
@@ -97,28 +104,32 @@ class Runner:
 		self._installer.append(installer)
 		return self
 
-	def run(self):
+	def run(self, what_to_run=None):
 		for installer in self._installer:
-			installer.run()
+			if what_to_run == 'setup':
+				installer.setup()
+			else:
+				installer.run()
 
 class OsInstaller(Installer):
+	def _setup(self):
+		self.pkg_remove('ntp')
+
 	def _run(self):
-		"ntp setup"
+		self.pkg_install('ntp')
 
 class DatabaseInstaller(Installer):
 	def _setup(self):
-		if self.pkg_installed('mysql-server'):
-			self.pkg_remove('mysql-server')
-		self.pkg_install('mysql-server')
-
-		try: self.shell("service mysql stop")
-		except: pass
-		self.shell("sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/my.cnf")
-		self.shell("rm -rf /var/lib/mysql")
-		self.shell("mysql_install_db")
-		self.shell("service mysql start")
-
+		self.pkg_remove('mysql-common')
+		self.shell('rm -rf /var/lib/mysql')
+		
 	def _run(self):
+		self.pkg_install('mysql-server')
+		self.pkg_install('python-mysqldb')
+
+		self.shell("sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/my.cnf")
+		self.shell("service mysql restart")
+
 		self.shell("""mysql -uroot -e "SET PASSWORD=PASSWORD('%s')" """ % self.context.passwd)
 		self.create_db('nova', 'nova')
 		self.create_db('glance', 'glance')
@@ -137,7 +148,6 @@ class KeystoneInstaller(Installer):
 	def _setup(self):
 		self.pkg_remove("keystone")
 		self.shell('rm -rf /var/lib/keystone')
-		self.pkg_install("keystone")
 
 		try: del os.environ['SERVICE_ENDPOINT']
 		except: pass
@@ -145,6 +155,7 @@ class KeystoneInstaller(Installer):
 		except: pass
 
 	def _run(self):
+		self.pkg_install("keystone")
 		self.replace('/etc/keystone/keystone.conf', 'admin_token = ADMIN', 'admin_token = %s' % self.context.passwd)
 		self.replace('/etc/keystone/keystone.conf',
 			r'connection = sqlite:\/\/\/\/var\/lib\/keystone\/keystone.db', 
@@ -217,7 +228,6 @@ class KeystoneInstaller(Installer):
 class GlanceInstaller(Installer):
 	def _setup(self):
 		self.pkg_remove('glance glance-registry glance-api')
-		self.pkg_install('glance')
 
 		#del os.environ['SERVICE_TOKEN']
 		#del os.environ['OS_TENANT_NAME']
@@ -227,6 +237,7 @@ class GlanceInstaller(Installer):
 		#del os.environ['SERVICE_ENDPOINT']
 
 	def _run(self):
+		self.pkg_install('glance')
 		self.file('/etc/glance/glance-api-paste.ini').replace(
 			'%SERVICE_TENANT_NAME%', 'service').replace(
 			'%SERVICE_USER%', 'glance').replace(
@@ -267,24 +278,9 @@ class GlanceInstaller(Installer):
 		self.shell('glance index')
 		#self.shell('glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://localhost:5000/v2.0 index')
 
-class NovaInstaller(Installer):
-	def _setup(self):
-		self.pkg_remove('nova-common')
-		self.pkg_remove('openstack-dashboard')
-		self.pkg_remove('dnsmasq-base')
 
-		try: self.shell('service tgt stop')
-		except: pass
-
-		try: self.shell('vgremove -f nova-volumes')
-		except: pass
-		self.shell('pvremove -ff -y %s' % self.context.volume_dev)
-
-	
-	def _run(self):
-		self.pkg_install('nova-api nova-cert nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
-		#self.pkg_install('nova-compute')
-
+class NovaBaseInstaller(Installer):
+	def _setup_nova_config(self):
 		f = self.file('/etc/nova/nova.conf')
 		#f.append('--dhcpbridge_flagfile=/etc/nova/nova.conf')
 		#f.append('--dhcpbridge=/usr/bin/nova-dhcpbridge')
@@ -333,6 +329,37 @@ class NovaInstaller(Installer):
 		#f.append('--root_helper=sudo nova-rootwrap')
 		#f.append('--verbose')
 
+		self.shell('chown -R nova:nova /etc/nova')
+		self.shell('chmod 644 /etc/nova/nova.conf')
+
+
+class NovaControllerInstaller(NovaBaseInstaller):
+	"""controller installation"""
+	def _setup(self):
+		self.pkg_remove('nova-common')
+		# volume depends
+		self.pkg_remove('tgt')
+		self.pkg_remove('apache2.2-common')
+		try: self.shell('killall -9 dnsmasq')
+		except: pass
+		try: self.shell('killall -9 kvm')
+		except: pass
+		self.pkg_remove('dnsmasq-base')
+		self.pkg_remove('openstack-dashboard')
+
+		try: self.shell('service tgt stop')
+		except: pass
+
+		try: self.shell('vgremove -f nova-volumes')
+		except: pass
+		self.shell('pvremove -ff -y %s' % self.context.volume_dev)
+
+	
+	def _run(self):
+		self.pkg_install('nova-api nova-cert nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
+
+		self._setup_nova_config()
+
 		# nova-volumes 이름을 가진 lvm volume group이 있어야한다.
 		self.shell('pvcreate %s' % self.context.volume_dev)
 		self.shell('vgcreate nova-volumes %s' % self.context.volume_dev)
@@ -364,106 +391,84 @@ class NovaInstaller(Installer):
 		#export OS_PASSWORD=admin
 		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
 
+		self.shell("service tgt restart")
 		self.shell("service nova-network restart")
 		self.shell("service nova-api restart")
 		self.shell("service nova-objectstore restart")
 		self.shell("service nova-scheduler restart")
 		self.shell("service nova-volume restart")
 		self.shell("service nova-consoleauth restart")
-		#self.shell('service nova-compute restart')
 
 		self.pkg_install('openstack-dashboard')
 		self.shell('service apache2 restart')
 
 
-class NovaNodeInstaller(Installer):
-	"""Nova Computing Node
-	Assumtions:
-		- eth0: management network
-		- eth1: guest network
-	"""
+class NovaComputeInstaller(NovaBaseInstaller):
+	"""for nova-compute"""
 	def _setup(self):
-		if not self.pkg_installed('ntp'): self.pkg_remove('ntp')
-		if not self.pkg_installed('nova-common'): self.pkg_remove('nova-common')
-
-	def _run_compute(self):
-		self.pkg_install('nova-compute')
-		self.shell('kvm-ok')
-
-		f = self.file('/etc/nova/nova.conf')
-		#f.append('--dhcpbridge_flagfile=/etc/nova/nova.conf')
-		#f.append('--dhcpbridge=/usr/bin/nova-dhcpbridge')
-		#f.append('--logdir=/var/log/nova')
-		#f.append('--state_path=/var/lib/nova')
-		#f.append('--lock_path=/run/lock/nova')
-		f.append('--allow_admin_api=true')
-		f.append('--use_deprecated_auth=false')
-		f.append('--auth_strategy=keystone')
-		f.append('--scheduler_driver=nova.scheduler.simple.SimpleScheduler')
-		f.append('--s3_host=%s' % self.context.control_ip)
-		f.append('--ec2_host=%s' % self.context.control_ip)
-		f.append('--rabbit_host=%s' % self.context.control_ip)
-		f.append('--cc_host=%s' % self.context.control_ip)
-		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.control_ip)
-		f.append('--routing_source_ip=%s' % self.context.private_gw)	# guest router?
-		f.append('--glance_api_servers=%s:9292' % self.context.control_ip)
-		f.append('--image_service=nova.image.glance.GlanceImageService')
-		f.append('--iscsi_ip_prefix=10.200.1')
-		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.control_ip))
-		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.control_ip)
-		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.control_ip)
-		f.append('--api_paste_config=/etc/nova/api-paste.ini')
-		f.append('--libvirt_type=kvm')
-		#f.append('--libvirt_use_virtio_for_bridges=true')
-		f.append('--start_guests_on_host_boot=true')
-		f.append('--resume_guests_state_on_host_boot=true')
-		# vnc specific configuration
-		f.append('--novnc_enabled=true')
-		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.control_ip)
-		f.append('--vncserver_proxyclient_address=%s' % self.context.control_ip)
-		f.append('--vncserver_listen=%s' % self.context.control_ip)
-		# network specific settings
-		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
-		f.append('--public_interface=eth0')
-		f.append('--flat_interface=%s' % self.context.bridge_iface)
-		f.append('--flat_network_bridge=%s' % self.context.bridge)
-		f.append('--fixed_range=%s' % self.context.private_net)
-		#f.append('--floating_range=10.10.10.2/27')		# TODO: hmm...
-		f.append('--network_size=%s' % self.context.private_net_size)				# TODO: hmm...
-		f.append('--flat_network_dhcp_start=%s' % self.context.private_dhcp_start)	# TODO: hmm...
-		f.append('--flat_injected=False')
-		#f.append('--force_dhcp_release')
-		#f.append('--iscsi_helper=tgtadm')
-		#f.append('--connection_type=libvirt')
-		#f.append('--root_helper=sudo nova-rootwrap')
-		#f.append('--verbose')
-
-		self.shell('chown -R nova:nova /etc/nova')
-		self.shell('chmod 644 /etc/nova/nova.conf')
-
-		self.file('/etc/nova/api-paste.ini').replace(
-			'%SERVICE_TENANT_NAME%', 'service').replace(
-			'%SERVICE_USER%', 'nova').replace(
-			'%SERVICE_PASSWORD%', self.context.passwd)
-
-		self.shell('service nova-compute restart')
-		self.shell('nova-manage service list')
+		# compute depends
+		self.pkg_remove('qemu-common libvirt0 open-iscsi')
 
 	def _run(self):
+		# nova-compute의 depens
+		# cgroup-lite cpu-checker dmidecode ebtables kpartx kvm kvm-ipxe libaio1 libapparmor1 libasound2 libasyncns0 libavahi-client3 libavahi-common-data libavahi-common3 libcaca0
+		# libflac8 libjson0 libnspr4 libnss3 libnuma1 libogg0 libpulse0 librados2 librbd1 libsdl1.2debian libsndfile1 libvirt-bin libvirt0 libvorbis0a libvorbisenc2 libxenstore3.0
+		# libxml2-utils libyajl1 msr-tools nova-compute-kvm open-iscsi open-iscsi-utils python-libvirt qemu-common qemu-kvm qemu-utils seabios vgabios
+
+		self.pkg_install('nova-compute')
+		self.shell('kvm-ok')
+		self.pkg_remove('dmidecode')	# 이 패키지가 설치되면 kvm이 서비스가 정상작동하지 않음, 아마 ubuntu vm의 문제일 듯..
+		self.shell('service libvirt-bin restart')
+
 		self.pkg_install('ntp')
-		self._run_compute()
+
+		self._setup_nova_config()
+
+		self.shell('service open-iscsi restart')
+		self.shell('service nova-compute restart')
+		self.shell('nova-manage service list')
 
 
 class SwiftInstaller(Installer):
 	def _setup(self):
 		self.pkg_remove('swift swift-proxy swift-account swift-container swift-object')
-		self.pkg_remove('xfsprogs')
 	
 	def _run(self):
-		self.pkg_install('swift swift-proxy swift-account swift-container swift-object')
-		self.pkg_install('xfsprogs python-pastedeploy')
+		pass
+		#self.pkg_install('swift swift-proxy swift-account swift-container swift-object')
 
 		# TODO: swift는 나중에 처리한다..
+
+
+class PrepareInstaller(Installer):
+	def _run(self):
+		# Create glance image
+		#
+		# 
+		# $ wget http://ftp.daum.net/ubuntu-releases/12.04/ubuntu-12.04-server-amd64.iso
+		# $ kvm-img create -f qcow2 server.qcow2 5G
+		# $ sudo kvm -m 256 -cdrom ubuntu-12.04-server-amd64.iso -drive file=server.qcow2,if=virtio,index=0 -boot d -net nic -net user -nographic  -vnc :0
+		# install ubuntu sever using gvncviewr <ip>:0
+		# this installed image placed at http://192.168.100.108/isos/server.qcow2
+		# $ glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < server.qcow2
+		image = 'ubuntu-12.04.qcow2'
+		if not os.path.exists(image):
+			self.shell('wget -O %s http://192.168.100.108/isos/server.qcow2' % image)
+		self.shell('glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < %s' % image)
+
+		# 테스트용 가상머신 생성
+		flavor = 9999
+		self.shell('nova-manage flavor create --name choe.test.small --memory=512 --cpu=1 --root_gb=5 --ephemeral_gb=100 --flavor %s' % flavor)
+		self.shell('nova-manage service list')
+
+		def nova_cmd():
+			return 'nova --os_username admin --os_password %s --os_tenant_name admin --os_auth_url=http://localhost:5000/v2.0' % (self.context.passwd)
+		def nova(*args): return self.shell('%s %s' % (nova_cmd(), ' '.join(args)))
+		def get_image(): return self.output("%s image-list| grep ACTIVE | awk '{print $2}'" % (nova_cmd())).strip()
+		nova('image-list')
+		nova('keypair-add test > test.pem')
+		nova('boot --flavor %s --image %s test' % (flavor, get_image()))
+		nova('list')
 
 def main():
 	if os.getuid() != 0: raise Exception, 'root required'
@@ -478,19 +483,19 @@ def main():
 		runner.append(DatabaseInstaller())
 		runner.append(KeystoneInstaller())
 		runner.append(GlanceInstaller())
-		runner.append(NovaInstaller())
+		runner.append(NovaControllerInstaller())
+		runner.append(NovaComputeInstaller())
 		runner.append(SwiftInstaller())
+		runner.append(PrepareInstaller())
 	elif mac in context.node_mac:
 		runner.append(NovaNodeInstaller())
-		# wget http://ftp.daum.net/ubuntu-releases/12.04/ubuntu-12.04-server-amd64.iso
-		# kvm-img create -f qcow2 server.img 5G
-		# sudo kvm -m 256 -cdrom ubuntu-12.04-server-amd64.iso -drive file=server.img,if=virtio,index=0 -boot d -net nic -net user -nographic  -vnc :0
-		# install ubuntu sever using gvncviewr <ip>:0
-		# glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < server.img
 	else:
 		raise Exception, 'Unknown mac %s' % mac
 
-	runner.run()
+	if len(sys.argv) == 2: what_to_run = sys.argv[1]
+	else: what_to_run = None
+
+	runner.run(what_to_run)
 
 
 main()
