@@ -44,7 +44,10 @@ def try_shell(command):
 
 def output(command):
 	print command
-	return subprocess.check_output(command, shell=True)
+	try:
+		return subprocess.check_output(command, shell=True)
+	except:
+		return ''
 	
 def pkg_installed(pkg):
 	try:
@@ -121,6 +124,7 @@ class OsInstaller(Installer):
 
 	def _run(self):
 		pkg_install('ntp')
+
 
 class DatabaseInstaller(Installer):
 	def _setup(self):
@@ -234,8 +238,8 @@ class KeystoneInstaller(Installer):
 
 class GlanceInstaller(Installer):
 	def _setup(self):
-		pkg_remove('glance glance-registry glance-api')
-		#shell('rm -rf /var/lib/glance')
+		pkg_remove('glance-common')
+		shell('rm -rf /var/lib/glance*')
 
 		#del os.environ['SERVICE_TOKEN']
 		#del os.environ['OS_TENANT_NAME']
@@ -414,7 +418,6 @@ class NovaComputeInstaller(NovaBaseInstaller):
 	def _setup(self):
 		# compute depends
 		pkg_remove('qemu-common libvirt0 open-iscsi')
-		shell('rm -rf /var/lib/nova/instances')
 
 	def _run(self):
 		# nova-compute의 depens
