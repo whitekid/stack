@@ -535,7 +535,7 @@ def main():
 	klasses = { }
 	for name, klass in get_classes(sys.modules[__name__]):
 		if issubclass(klass, Installer):
-			klasses[klass.role] = klass
+			if klass.role: klasses[klass.role] = klass
 
 	# build runner
 	runner = Runner(context)
