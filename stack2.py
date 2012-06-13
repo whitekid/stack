@@ -19,7 +19,7 @@ OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치
   * HDD: 500G x 2 (하나는 OS, 나머지 하나는 nova-volume에서 사용함)
   * Network:
     * vmnet2/ eth0/ 10.200.1.10 : 관리용
-    * vmnet3/ eth0/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
+    * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
 
 - openstack-node:
   * enable "Virtualize intel VT-x/EPT or AMD-V/RVI" option
@@ -28,7 +28,7 @@ OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치
   * HDD: 500G (그냥 우선 대충 충분히 많게)
   * Network:
     * vmnet2/ eth0/ 10.200.1.20 : 관리용
-    * vmnet3/ eth0/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
+    * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
 
 미리 설정할 것
 -------------
