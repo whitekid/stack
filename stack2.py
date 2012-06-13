@@ -388,7 +388,7 @@ class NovaBaseInstaller(Installer):
 		# vnc specific configuration
 		f.append('--novnc_enabled=true')
 		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.control_ip)
-		f.append('--vncserver_proxyclient_address=%s' % get_ip('eth0'))
+		f.append('--vncserver_proxyclient_address=%s' % self.context.control.ip)
 		f.append('--vncserver_listen=%s' % get_ip('eth0'))
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
