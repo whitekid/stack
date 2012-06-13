@@ -34,6 +34,7 @@ OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치
   * Network:
     * vmnet2/ eth0/ 10.200.1.20 : 관리용
     * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
+    * create bridge br100 with eth1
 
 Virtual Environment
 -------------------
