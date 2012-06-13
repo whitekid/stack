@@ -7,8 +7,8 @@
 # value: 부여할 롤, 순서대로 적용되며 Installer.role에 정의되어 있음
 [roles]
 # controller
-000c29d5165f = os, compute, prepare-instance
+000c296a6433 = os, db, keystone, glance, controller, swift, prepare-image
 
 # compute node
-000c296a6433 = os, db, keystone, glance, controller, swift, prepare-image
+000c29d5165f = os, compute, prepare-instance
 
