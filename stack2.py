@@ -48,6 +48,15 @@ Issues
  * 생성된 인스턴스에서 외부로 트래픽이 나가지 않는 문제
    - nova-network이 설치된 호스트까지 traffic이 나가는 것은 확인
    - 아마도 nova-network에서 iptables에서 수정해야 할 것 같음
+
+
+Troubleshooting
+===============
+
+nova-compute에서 instance를 만들는데 에러가 나는 경우
+-----------------------------------------------------
+/var/log/nova/nova-compute.log에 "Instance already created" 와 같은 에러가 나면
+nova-scheduler에서 사용하는 amqp(rabbitmq)의 캐쉬 문제일 가능성이 있다. 재시작하고 다시 시도한다.
 """
 import os, sys
 import subprocess
@@ -421,6 +430,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		# volume depends
 		pkg_remove('tgt')
 		pkg_remove('apache2.2-common')
+		pkg_remove('memcached')
 		try_shell('service memcached restart')	# openstack-dashboard에서 사용하는데.. 캐쉬 문제로 에러가 발생하는 경우가 있음
 		try_shell('service rabbitmq-server restart')
 		try_shell('killall -9 dnsmasq')
