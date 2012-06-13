@@ -1,13 +1,22 @@
 #!/usr/bin/python
 # -*- coding: utf8 -*-
+"""
+"""
 import os, sys
 import subprocess
 import json
 import time
+import inspect
 
 class Context:
-	control_mac = ['00:0c:29:6a:64:33']
-	node_mac = ['00:0c:29:d5:16:5f']
+	roles = {
+		'00:0c:29:6a:64:33':
+			('os', 'db', 'keystone', 'glance', 'controller', 'swift', 'prepare-image'),
+		'00:0c:29:d5:16:5f':
+			('os', 'compute', 'prepare-instance')
+	}
+
+	# 모든 암호는 아래로 설정된다.
 	passwd = 'choe'
 	region = 'region0'
 	volume_dev = '/dev/sdb'
@@ -20,9 +29,6 @@ class Context:
 	bridge_iface = 'eth1'
 	control_ip = '10.200.1.10'
 
-	def __init__(self):
-		self.hostname = subprocess.check_output('hostname').strip()
-
 
 def get_ip(iface = None):
 	if iface == None: iface = 'eth0'
@@ -31,6 +37,10 @@ def get_ip(iface = None):
 def get_mac(iface = None):
 	if iface == None: iface = 'eth0'
 	return subprocess.check_output("ifconfig %s | grep HWaddr | awk '{print $5}'" % iface, shell=True).strip()
+
+def get_hostname():
+	return subprocess.check_output('hostname').strip()
+
 
 def shell(command):
 	print command
@@ -65,7 +75,9 @@ def pkg_install(pkg):
 	finally:
 		del os.environ['DEBIAN_FRONTEND']
 
-class Installer:
+class Installer(object):
+	role = None
+
 	def run(self):
 		self._setup()
 		self._run()
@@ -119,6 +131,8 @@ class Runner:
 				installer.run()
 
 class OsInstaller(Installer):
+	role = 'os'
+
 	def _setup(self):
 		pkg_remove('ntp')
 
@@ -127,6 +141,8 @@ class OsInstaller(Installer):
 
 
 class DatabaseInstaller(Installer):
+	role = 'db'
+
 	def _setup(self):
 		pkg_remove('mysql-common')
 		shell('rm -rf /var/lib/mysql')
@@ -148,7 +164,7 @@ class DatabaseInstaller(Installer):
 
 	def create_db(self, dbname, user):
 		passwd = self.context.passwd
-		hostname = self.context.hostname
+		hostname = get_hostname()
 
 		shell("""mysql -uroot -p%(passwd)s -e "create database %(dbname)s;" """ % locals())
 		shell("""mysql -uroot -p%(passwd)s -e "grant all on %(dbname)s.* to %(user)s identified by '%(passwd)s';" """ % locals())
@@ -156,6 +172,8 @@ class DatabaseInstaller(Installer):
 		shell("""mysql -uroot -p%(passwd)s -e "grant all on %(dbname)s.* to %(user)s@'%(hostname)s' identified by '%(passwd)s';" """ % locals())
 
 class KeystoneInstaller(Installer):
+	role = 'keystone'
+
 	def _setup(self):
 		pkg_remove("keystone")
 		shell('rm -rf /var/lib/keystone')
@@ -237,6 +255,8 @@ class KeystoneInstaller(Installer):
 	
 
 class GlanceInstaller(Installer):
+	role = 'glance'
+
 	def _setup(self):
 		pkg_remove('glance-common')
 		shell('rm -rf /var/lib/glance*')
@@ -347,12 +367,15 @@ class NovaBaseInstaller(Installer):
 
 class NovaControllerInstaller(NovaBaseInstaller):
 	"""controller installation"""
+	role = 'controller'
+
 	def _setup(self):
 		pkg_remove('nova-common')
 		# volume depends
 		pkg_remove('tgt')
 		pkg_remove('apache2.2-common')
 		try_shell('service memcached restart')	# openstack-dashboard에서 사용하는데.. 캐쉬 문제로 에러가 발생하는 경우가 있음
+		try_shell('service rabbitmq-server restart')
 		try_shell('killall -9 dnsmasq')
 		try_shell('killall -9 kvm')
 		pkg_remove('dnsmasq-base')
@@ -414,11 +437,11 @@ class NovaControllerInstaller(NovaBaseInstaller):
 
 
 class NovaComputeInstaller(NovaBaseInstaller):
-	"""for nova-compute"""
+	role = 'compute'
+
 	def _setup(self):
 		# compute depends
-		pkg_remove('nova-common nova-compute qemu-common libvirt0 open-iscsi')
-		pkg_remove('ntp')	# amqp로 통신하는 것들은 시간이 안맞으면 통신을 하지 못한다 ..
+		pkg_remove('nova-compute qemu-common libvirt0 open-iscsi')
 
 	def _run(self):
 		# nova-compute의 depens
@@ -442,6 +465,8 @@ class NovaComputeInstaller(NovaBaseInstaller):
 
 
 class SwiftInstaller(Installer):
+	role = 'swift'
+
 	def _setup(self):
 		pkg_remove('swift swift-proxy swift-account swift-container swift-object')
 	
@@ -453,6 +478,8 @@ class SwiftInstaller(Installer):
 
 
 class PrepareImageInstaller(Installer):
+	role = 'prepare-image'
+
 	def _run(self):
 		# Create glance image
 		#
@@ -470,6 +497,8 @@ class PrepareImageInstaller(Installer):
 
 
 class PrepareInstanceInstaller(Installer):
+	role = 'prepare-instance'
+
 	def _setup(self):
 		try_shell('nova-manage flavor delete --name choe.test.small')
 		try_shell('killall kvm')
@@ -492,30 +521,30 @@ class PrepareInstanceInstaller(Installer):
 		self._nova('boot --flavor %s --image %s test' % (flavor, get_image()))
 		self._nova('list')
 
+def get_classes(module):
+	for name, obj in inspect.getmembers(module):
+		if inspect.isclass(obj):
+			yield name, obj
+
 def main():
 	if os.getuid() != 0: raise Exception, 'root required'
 
 	context = Context()
+
+	# build installer
+	klasses = { }
+	for name, klass in get_classes(sys.modules[__name__]):
+		if issubclass(klass, Installer):
+			klasses[klass.role] = klass
+
+	# build runner
 	runner = Runner(context)
-
-	mac = get_mac()
-	if mac in context.control_mac:
-		# controller
-		runner.append(OsInstaller())
-		runner.append(DatabaseInstaller())
-		runner.append(KeystoneInstaller())
-		runner.append(GlanceInstaller())
-		runner.append(NovaControllerInstaller())
-		#runner.append(NovaComputeInstaller())
-		runner.append(SwiftInstaller())
-		runner.append(PrepareImageInstaller())
-		#runner.append(PrepareInstanceInstaller())
-	elif mac in context.node_mac:
-		runner.append(NovaComputeInstaller())
-		runner.append(PrepareInstanceInstaller())
-	else:
-		raise Exception, 'Unknown mac %s' % mac
-
+	for role in context.roles[get_mac()]:
+		try:
+			runner.append(klasses[role]())
+		except IndexError, e:
+			raise Exception, 'Undefined role: %s' % role
+		
 	if len(sys.argv) == 2: what_to_run = sys.argv[1]
 	else: what_to_run = None
 
