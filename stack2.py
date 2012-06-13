@@ -1,6 +1,51 @@
 #!/usr/bin/python
 # -*- coding: utf8 -*-
 """
+Design
+======
+
+Physical Machine
+----------------
+OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치하고 가상머신 2대를 설치하여 각각 control node, compute node로 사용한다.
+
+- Host OS: Ubutu 12.04 64bit desktop
+- VMWare Network Setup
+  * vmnet2: 10.200.1.0/24 for management network
+  * vmnet3: 10.200.2.0/24 for private network
+
+- openstack-control:
+  * 설치할 구성 요소: database, dashboard, nova(except compute), glance, swift(not done)
+  * Memory: 1G
+  * HDD: 500G x 2 (하나는 OS, 나머지 하나는 nova-volume에서 사용함)
+  * Network:
+    * vmnet2/ eth0/ 10.200.1.10 : 관리용
+    * vmnet3/ eth0/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
+
+- openstack-node:
+  * enable "Virtualize intel VT-x/EPT or AMD-V/RVI" option
+  * 설치할 구성 요소: nova-compute
+  * Memory: 4G
+  * HDD: 500G (그냥 우선 대충 충분히 많게)
+  * Network:
+    * vmnet2/ eth0/ 10.200.1.20 : 관리용
+    * vmnet3/ eth0/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
+
+미리 설정할 것
+-------------
+VMWare는 기본적으로 vmnet이 promiscuous 모드로 동작하지 않도록 되있다. 아래처럼 promiscuous
+
+$ sudo chgrp `whoami` /dev/vmnet*
+$ sudo chmod g+rw `whoami` /dev/vmnet*
+
+NAT 설정
+$ sudo sysctl net.ipv4.ip_forward=0
+$ sudo iptables -A POSTROUTING -t nat -j MASQUERADE
+
+Issues
+======
+ * 생성된 인스턴스에서 외부로 트래픽이 나가지 않는 문제
+   - nova-network이 설치된 호스트까지 traffic이 나가는 것은 확인
+   - 아마도 nova-network에서 iptables에서 수정해야 할 것 같음
 """
 import os, sys
 import subprocess
@@ -526,7 +571,13 @@ def get_classes(module):
 		if inspect.isclass(obj):
 			yield name, obj
 
+def read_config():
+	
 def main():
+	import ConfigParser
+	config = ConfigParser.SafeConfigParser()
+	config.read(os.path.dirname(sys.argv[0]) + '/stack2.conf')
+
 	if os.getuid() != 0: raise Exception, 'root required'
 
 	context = Context()
@@ -539,12 +590,13 @@ def main():
 
 	# build runner
 	runner = Runner(context)
-	for role in context.roles[get_mac()]:
+	for role in config.get('roles', get_mac().replace(':','')).split(', '):
 		try:
 			runner.append(klasses[role]())
 		except IndexError, e:
 			raise Exception, 'Undefined role: %s' % role
 		
+	pass
 	if len(sys.argv) == 2: what_to_run = sys.argv[1]
 	else: what_to_run = None
 
