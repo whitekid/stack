@@ -323,7 +323,7 @@ class NovaBaseInstaller(Installer):
 		# vnc specific configuration
 		f.append('--novnc_enabled=true')
 		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.control_ip)
-		f.append('--vncserver_proxyclient_address=%s' % self.context.control_ip)
+		f.append('--vncserver_proxyclient_address=%s' % get_ip('eth0'))
 		f.append('--vncserver_listen=%s' % get_ip('eth0'))
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
@@ -417,7 +417,7 @@ class NovaComputeInstaller(NovaBaseInstaller):
 	"""for nova-compute"""
 	def _setup(self):
 		# compute depends
-		pkg_remove('nova-compute qemu-common libvirt0 open-iscsi')
+		pkg_remove('nova-common nova-compute qemu-common libvirt0 open-iscsi')
 		pkg_remove('ntp')	# amqp로 통신하는 것들은 시간이 안맞으면 통신을 하지 못한다 ..
 
 	def _run(self):
@@ -472,6 +472,7 @@ class PrepareImageInstaller(Installer):
 class PrepareInstanceInstaller(Installer):
 	def _setup(self):
 		try_shell('nova-manage flavor delete --name choe.test.small')
+		try_shell('killall kvm')
 
 	def _nova_cmd(self):
 		return 'nova --os_username admin --os_password %s --os_tenant_name admin --os_auth_url=http://%s:35357/v2.0' % (self.context.passwd, self.context.control_ip)
