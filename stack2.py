@@ -3,6 +3,9 @@
 """
 OpenStack Installer stack2
 
+Overview
+========
+
 Design
 ======
 
@@ -32,6 +35,10 @@ OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치
     * vmnet2/ eth0/ 10.200.1.20 : 관리용
     * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
 
+Virtual Environment
+-------------------
+ * hypervisor: kvm(OpenStack의 기본 hypervisor)
+
 미리 설정할 것
 -------------
 VMWare는 기본적으로 vmnet이 promiscuous 모드로 동작하지 않도록 되있다. 아래처럼 promiscuous
@@ -43,11 +50,21 @@ NAT 설정
 $ sudo sysctl net.ipv4.ip_forward=0
 $ sudo iptables -A POSTROUTING -t nat -j MASQUERADE
 
-Issues
+TODO
 ======
  * 생성된 인스턴스에서 외부로 트래픽이 나가지 않는 문제
    - nova-network이 설치된 호스트까지 traffic이 나가는 것은 확인
    - 아마도 nova-network에서 iptables에서 수정해야 할 것 같음
+
+* keypair로 접속하도록 설정하기
+
+Troubleshooting
+===============
+
+nova-compute에서 instance를 만들는데 에러가 나는 경우
+-----------------------------------------------------
+/var/log/nova/nova-compute.log에 "Instance already created" 와 같은 에러가 나면
+nova-scheduler에서 사용하는 amqp(rabbitmq)의 캐쉬 문제일 가능성이 있다. 재시작하고 다시 시도한다.
 """
 import os, sys
 import subprocess
@@ -56,13 +73,6 @@ import time
 import inspect
 
 class Context:
-	roles = {
-		'00:0c:29:6a:64:33':
-			('os', 'db', 'keystone', 'glance', 'controller', 'swift', 'prepare-image'),
-		'00:0c:29:d5:16:5f':
-			('os', 'compute', 'prepare-instance')
-	}
-
 	# 모든 암호는 아래로 설정된다.
 	passwd = 'choe'
 	region = 'region0'
@@ -264,7 +274,7 @@ class KeystoneInstaller(Installer):
 
 		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('swift'), self.get_role_id('member'), self.get_tenant_id('admin')))
 
-		# create servic3
+		# create service
 		shell("keystone service-create --name nova --type compute --description 'OpenStack Compute Service'")
 		shell("keystone service-create --name volume --type volume --description 'OpenStack Volume Service'")
 		shell("keystone service-create --name glance --type image --description 'OpenStack Image Service'")
@@ -421,6 +431,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		# volume depends
 		pkg_remove('tgt')
 		pkg_remove('apache2.2-common')
+		pkg_remove('memcached')
 		try_shell('service memcached restart')	# openstack-dashboard에서 사용하는데.. 캐쉬 문제로 에러가 발생하는 경우가 있음
 		try_shell('service rabbitmq-server restart')
 		try_shell('killall -9 dnsmasq')
