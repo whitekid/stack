@@ -1,6 +1,8 @@
 #!/usr/bin/python
 # -*- coding: utf8 -*-
 """
+OpenStack Installer stack2
+
 Design
 ======
 
@@ -572,11 +574,12 @@ def get_classes(module):
 			yield name, obj
 
 def read_config():
-	
-def main():
 	import ConfigParser
 	config = ConfigParser.SafeConfigParser()
 	config.read(os.path.dirname(sys.argv[0]) + '/stack2.conf')
+	return config
+	
+def main():
 
 	if os.getuid() != 0: raise Exception, 'root required'
 
@@ -590,13 +593,12 @@ def main():
 
 	# build runner
 	runner = Runner(context)
-	for role in config.get('roles', get_mac().replace(':','')).split(', '):
+	for role in read_config().get('roles', get_mac().replace(':','')).split(', '):
 		try:
 			runner.append(klasses[role]())
 		except IndexError, e:
 			raise Exception, 'Undefined role: %s' % role
 		
-	pass
 	if len(sys.argv) == 2: what_to_run = sys.argv[1]
 	else: what_to_run = None
 
