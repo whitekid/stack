@@ -19,3 +19,44 @@
 # compute node
 000c29d5165f = os, compute, prepare-instance
 
+
+#
+# nova-volume
+#
+[volume]
+# nova-volume이 위치할 디바이스,
+# 이 디바이스에 pvcreate로 physical volume을 만드고 vgcreate로 nova-volumes라는 logical volume이 만들어진다.
+dev = /dev/sdb
+
+
+#
+# nova-network
+#
+[network]
+# controller ip
+control_ip = 10.200.1.10
+
+# instance 들이 사용할 bridge 이름, br100이 openstack 기본값
+# nova-network 호스트는 이 bridge가 없으면 자동으로 생성하지만
+# nova-compute 만 설치된 호스트는 이 bridge를 만들지 않으므로 미리 만들어야 한다.
+# 이 스크립트에서는 nova-compute에서 자동으로 bridge를 생성한다.
+bridge = br100
+
+# 위의 bridge와 연결된 interface, 즉 모든 guest traffic은 여기로 흐른다.
+bridge_iface = eth1
+
+
+#
+# swift
+#
+[swift]
+# swift device
+# /dev/로 시작하면 물리 디바이스, 아니면 loopback file 디바이스
+dev = swift.img
+
+# loopback file size
+loopback_size = 10G
+
+# 위 디비이스를 마운트할 위치
+mount = /var/swift
+

@@ -73,11 +73,10 @@ import json
 import time
 import inspect
 
-class Context:
+class Config:
 	# 모든 암호는 아래로 설정된다.
 	passwd = 'choe'
 	region = 'region0'
-	volume_dev = '/dev/sdb'
 	private_net = '10.200.2.0/24'
 	private_net_size = 254	# ip address의 갯수
 	private_gw = '10.200.2.1'
@@ -85,7 +84,15 @@ class Context:
 	private_dhcp_start = '10.200.2.10'
 	bridge = 'br100'
 	bridge_iface = 'eth1'
-	control_ip = '10.200.1.10'
+
+	def __init__(self):
+		import ConfigParser
+
+		self._config = ConfigParser.SafeConfigParser()
+		self._config.read(os.path.dirname(sys.argv[0]) + '/stack2.conf')
+
+	def get(self, section, key):
+		return self._config.get(section, key)
 
 
 def get_ip(iface = None):
@@ -288,9 +295,9 @@ class KeystoneInstaller(Installer):
 		def endpoint_create(service_name, publicurl, adminurl, internalurl):
 			region = self.context.region
 			service_id = self.get_service_id(service_name)
-			publicurl = publicurl % {'ip': self.context.control_ip}
-			adminurl = adminurl % {'ip': self.context.control_ip}
-			internalurl = internalurl % {'ip': self.context.control_ip}
+			publicurl = publicurl % {'ip': self.context.get('network', 'control_ip')}
+			adminurl = adminurl % {'ip': self.context.get('network', 'control_ip')}
+			internalurl = internalurl % {'ip': self.context.get('network', 'control_ip')}
 
 			shell(
 				"keystone endpoint-create --region %(region)s --service_id %(service_id)s "
@@ -381,18 +388,18 @@ class NovaBaseInstaller(Installer):
 		f.append('--use_deprecated_auth=false')
 		f.append('--auth_strategy=keystone')
 		f.append('--scheduler_driver=nova.scheduler.simple.SimpleScheduler')
-		f.append('--s3_host=%s' % self.context.control_ip)
-		f.append('--ec2_host=%s' % self.context.control_ip)
-		f.append('--rabbit_host=%s' % self.context.control_ip)
-		f.append('--cc_host=%s' % self.context.control_ip)
-		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.control_ip)
-		f.append('--routing_source_ip=%s' % self.context.control_ip)
-		f.append('--glance_api_servers=%s:9292' % self.context.control_ip)
+		f.append('--s3_host=%s' % self.context.get('network', 'control_ip'))
+		f.append('--ec2_host=%s' % self.context.get('network', 'control_ip'))
+		f.append('--rabbit_host=%s' % self.context.get('network', 'control_ip'))
+		f.append('--cc_host=%s' % self.context.get('network', 'control_ip'))
+		f.append('--nova_url=http://%s:8774/v1.1/' % self.context.get('network', 'control_ip'))
+		f.append('--routing_source_ip=%s' % self.context.get('network', 'control_ip'))
+		f.append('--glance_api_servers=%s:9292' % self.context.get('network', 'control_ip'))
 		f.append('--image_service=nova.image.glance.GlanceImageService')
 		f.append('--iscsi_ip_prefix=192.168.4')
-		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.control_ip))
-		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.control_ip)
-		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.control_ip)
+		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context.get('network', 'control_ip')))
+		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context.get('network', 'control_ip'))
+		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context.get('network', 'control_ip'))
 		f.append('--api_paste_config=/etc/nova/api-paste.ini')
 		f.append('--libvirt_type=kvm')
 		#f.append('--libvirt_use_virtio_for_bridges=true')
@@ -400,14 +407,14 @@ class NovaBaseInstaller(Installer):
 		f.append('--resume_guests_state_on_host_boot=true')
 		# vnc specific configuration
 		f.append('--novnc_enabled=true')
-		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.control_ip)
-		f.append('--vncserver_proxyclient_address=%s' % self.context.control_ip)
+		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context.get('network', 'control_ip'))
+		f.append('--vncserver_proxyclient_address=%s' % self.context.get('network', 'control_ip'))
 		f.append('--vncserver_listen=%s' % get_ip('eth0'))
 		# network specific settings
 		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
 		f.append('--public_interface=eth0')
-		f.append('--flat_interface=%s' % self.context.bridge_iface)
-		f.append('--flat_network_bridge=%s' % self.context.bridge)
+		f.append('--flat_interface=%s' % self.context.get('network', 'bridge_iface'))
+		f.append('--flat_network_bridge=%s' % self.context.get('network', 'bridge'))
 		f.append('--fixed_range=%s' % self.context.private_net)
 		#f.append('--floating_range=10.200.3.0/24')		# TODO: public ip range인데 아직은 고려하지 않음
 		f.append('--network_size=%s' % self.context.private_net_size)				# TODO: hmm...
@@ -443,7 +450,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		try_shell('service tgt stop')
 
 		try_shell('vgremove -f nova-volumes')
-		shell('pvremove -ff -y %s' % self.context.volume_dev)
+		shell('pvremove -ff -y %s' % self.context.get('volume', 'dev'))
 		shell('rm -rf /var/lib/nova')
 
 	
@@ -453,8 +460,8 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		self._setup_nova_config()
 
 		# nova-volumes 이름을 가진 lvm volume group이 있어야한다.
-		shell('pvcreate %s' % self.context.volume_dev)
-		shell('vgcreate nova-volumes %s' % self.context.volume_dev)
+		shell('pvcreate %s' % self.context.get('volume', 'dev'))
+		shell('vgcreate nova-volumes %s' % self.context.get('volume', 'dev'))
 
 		shell('chown -R nova:nova /etc/nova')
 		shell('chmod 644 /etc/nova/nova.conf')
@@ -474,8 +481,11 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		# TODO: DHCP Server가 10.200.2.1로 들어가고 있음. compute-nod의 /var/lib/nova/instances/instance-00000002/libvirt.xml 를 확인...
 		#shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s --dns1 %s --gateway %s' %
 		#	(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size, self.context.private_dns1, self.context.private_gw))
-		shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s' %
-			(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size))
+		shell(
+			'nova-manage network create private --fixed_range_v4=%s --num_networks=1 '
+			'--bridge=%s --bridge_interface=%s --network_size=%s' %
+			(self.context.private_net, self.context.get('network', 'bridge'),
+			 self.context.get('network', 'bridge_iface'), self.context.private_net_size))
 
 		# 이전과 비슷
 		#export OS_TENANT_NAME=admin
@@ -501,9 +511,9 @@ class NovaComputeInstaller(NovaBaseInstaller):
 	def _setup(self):
 		# compute depends
 		pkg_remove('nova-compute qemu-common libvirt0 open-iscsi')
-		if output('brctl show | grep -c %s' % self.context.bridge).strip() == '0':
-			shell('brctl addbr %s' % self.context.bridge)
-			shell('brctl addif %s %s' % (self.context.bridge, self.context.bridge_iface))
+		if output('brctl show | grep -c %s' % self.context.get('network', 'bridge')).strip() == '0':
+			shell('brctl addbr %s' % self.context.get('network', 'bridge'))
+			shell('brctl addif %s %s' % (self.context.get('network', 'bridge'), self.context.get('network', 'bridge_iface')))
 
 	def _run(self):
 		# nova-compute의 depens
@@ -531,13 +541,30 @@ class SwiftInstaller(Installer):
 
 	def _setup(self):
 		pkg_remove('swift swift-proxy swift-account swift-container swift-object')
+		pkg_remove('xfsprogs')
+
+		self.dev = self.context.get('swift', 'dev')
+		self.mount = self.context.get('swift', 'mount')
+		try_shell('umount %s' % self.mount)
 	
 	def _run(self):
-		pass
-		#pkg_install('swift swift-proxy swift-account swift-container swift-object')
+		pkg_install('swift swift-proxy swift-account swift-container swift-object')
+		pkg_install('xfsprogs')
+		pkg_install('curl python-pastedeploy')
 
-		# TODO: swift는 나중에 처리한다..
+		mount_opt = ''
+		if not self.dev.startswith('/dev/'):
+			shell('truncate --size=%s %s' % (self.context.get('swift', 'loopback_size'), self.dev))
+			mount_opt = '-o loop'
 
+		shell('mkfs.xfs -f %s' % self.dev)
+		shell('mkdir -p %s' % self.context.get('swift', 'mount'))
+		# /dev/sdb3 /mnt/swift_backend xfs noatime,nodiratime,nobarrier,logbufs=8 0 0
+
+		shell('mount %s %s %s' % (mount_opt, self.dev, self.mount))
+		for i in range(1,5):
+			shell('mkdir %s/node%s' % (self.mount, i))
+			shell('chown -R swift.swift %s/node%s' % (self.mount, i))
 
 class PrepareImageInstaller(Installer):
 	role = 'prepare-image'
@@ -555,7 +582,10 @@ class PrepareImageInstaller(Installer):
 		image = 'ubuntu-12.04.qcow2'
 		if not os.path.exists(image):
 			shell('wget -O %s http://192.168.100.108/isos/server.qcow2' % image)
-		shell('glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < %s' % image)
+
+		shell('glance --os_username=admin --os_password=choe --os_tenant=admin '
+			  '--os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" '
+			  'is_public=true container_format=ovf disk_format=qcow2 < %s' % image)
 
 
 class PrepareInstanceInstaller(Installer):
@@ -566,7 +596,10 @@ class PrepareInstanceInstaller(Installer):
 		try_shell('killall kvm')
 
 	def _nova_cmd(self):
-		return 'nova --os_username admin --os_password %s --os_tenant_name admin --os_auth_url=http://%s:35357/v2.0' % (self.context.passwd, self.context.control_ip)
+		return \
+			'nova --os_username admin --os_password %s --os_tenant_name admin ' \
+			'--os_auth_url=http://%s:35357/v2.0' % (self.context.passwd, self.context.get('network', 'control_ip'))
+
 	def _nova(self, *args): return shell('%s %s' % (self._nova_cmd(), ' '.join(args)))
 
 	def _run(self):
@@ -576,6 +609,7 @@ class PrepareInstanceInstaller(Installer):
 		shell('nova-manage service list')
 
 		def get_image(): return output("%s image-list| grep ACTIVE | awk '{print $2}'" % (self._nova_cmd())).strip()
+
 		self._nova('image-list')
 		try: self._nova('keypair-delete test')
 		except: pass
@@ -588,16 +622,11 @@ def get_classes(module):
 		if inspect.isclass(obj):
 			yield name, obj
 
-def read_config():
-	import ConfigParser
-	config = ConfigParser.SafeConfigParser()
-	config.read(os.path.dirname(sys.argv[0]) + '/stack2.conf')
-	return config
 	
 def main():
 	if os.getuid() != 0: raise Exception, 'root required'
 
-	context = Context()
+	config = Config()
 
 	# build installer
 	klasses = { }
@@ -606,8 +635,8 @@ def main():
 			if klass.role: klasses[klass.role] = klass
 
 	# build runner
-	runner = Runner(context)
-	for role in read_config().get('roles', get_mac().replace(':','')).split(', '):
+	runner = Runner(config)
+	for role in config.get('roles', get_mac().replace(':','')).split(', '):
 		try:
 			runner.append(klasses[role]())
 		except IndexError, e:
