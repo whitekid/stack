@@ -489,6 +489,9 @@ class NovaComputeInstaller(NovaBaseInstaller):
 	def _setup(self):
 		# compute depends
 		pkg_remove('nova-compute qemu-common libvirt0 open-iscsi')
+		if output('brctl show | grep -c %s' % self.context.bridge).strip() == '0':
+			shell('brctl addbr %s' % self.context.bridge)
+			shell('brctl addif %s %s' % (self.context.bridge, self.context.bridge_iface))
 
 	def _run(self):
 		# nova-compute의 depens
@@ -580,7 +583,6 @@ def read_config():
 	return config
 	
 def main():
-
 	if os.getuid() != 0: raise Exception, 'root required'
 
 	context = Context()
