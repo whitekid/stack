@@ -453,6 +453,8 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		shell('pvremove -ff -y %s' % self.context.get('volume', 'dev'))
 		shell('rm -rf /var/lib/nova')
 
+		shell('sysctl net.ipv4.ip_forward=0')
+
 	
 	def _run(self):
 		pkg_install('nova-api nova-cert nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
@@ -503,6 +505,8 @@ class NovaControllerInstaller(NovaBaseInstaller):
 
 		pkg_install('openstack-dashboard')
 		shell('service apache2 restart')
+
+		shell('sysctl net.ipv4.ip_forward=1')
 
 
 class NovaComputeInstaller(NovaBaseInstaller):
