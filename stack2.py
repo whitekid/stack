@@ -522,8 +522,11 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 
 	def _run(self):
 		pkg_install('nova-network')
+		self._setup_nova_config()
+
 		shell("service nova-network restart")
 		shell('sysctl net.ipv4.ip_forward=1')
+
 
 class NovaComputeInstaller(NovaBaseInstaller):
 	role = 'compute'
