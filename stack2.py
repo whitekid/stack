@@ -299,7 +299,7 @@ class KeystoneInstaller(Installer):
 		def endpoint_create(service_name, publicurl, adminurl, internalurl):
 			region = self.context.region
 			service_id = self.get_service_id(service_name)
-			publicurl = publicurl % {'ip': self.contex['network.control_ip']}
+			publicurl = publicurl % {'ip': self.context['network.control_ip']}
 			adminurl = adminurl % {'ip': self.context['network.control_ip']}
 			internalurl = internalurl % {'ip': self.context['network.control_ip']}
 
