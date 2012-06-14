@@ -14,7 +14,8 @@
 # 000c29d5165f = os, compute, prepare-instance					; nova-compute
 [roles]
 # controller
-000c296a6433 = os, db, keystone, glance, controller, swift, prepare-image
+000c296a6433 = network
+#000c296a6433 = os, db, keystone, glance, controller, network, swift, prepare-image
 
 # compute node
 000c29d5165f = os, compute, prepare-instance
