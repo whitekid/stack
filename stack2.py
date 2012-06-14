@@ -513,6 +513,9 @@ class NovaComputeInstaller(NovaBaseInstaller):
 	role = 'compute'
 
 	def _setup(self):
+		if output("egrep -c '(vmx|svm)' /proc/cpuinfo").strip() == '0':
+			raise Exception, 'CPU hardware virtualization not enabled'
+
 		# compute depends
 		pkg_remove('nova-compute qemu-common libvirt0 open-iscsi')
 		if output('brctl show | grep -c %s' % self.context.get('network', 'bridge')).strip() == '0':
