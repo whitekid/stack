@@ -66,6 +66,12 @@ nova-compute에서 instance를 만들는데 에러가 나는 경우
 -----------------------------------------------------
 /var/log/nova/nova-compute.log에 "Instance already created" 와 같은 에러가 나면
 nova-scheduler에서 사용하는 amqp(rabbitmq)의 캐쉬 문제일 가능성이 있다. 재시작하고 다시 시도한다.
+
+dashboard를 접속하는데 Internal Server Error
+--------------------------------------------
+이것은 django의 문제로, 로그에 보면 cross site scriptig을 차단하는 라이브러리 오류라고 나온다.
+django를 재설치하면 해결된다.
+$ apt-get purge -y python-django && apt-get install -y openstack-dashboard
 """
 import os, sys
 import subprocess
@@ -440,6 +446,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 
 	def _setup(self):
 		pkg_remove('nova-common')
+		pkg_remove('novnc')
 		# volume depends
 		pkg_remove('tgt')
 		pkg_remove('apache2.2-common')
@@ -448,6 +455,8 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		try_shell('service rabbitmq-server restart')
 		try_shell('killall -9 dnsmasq')
 		try_shell('killall -9 kvm')
+		try_shell('killall -9 epmd')
+		try_shell('killall -9 beam')
 		pkg_remove('dnsmasq-base')
 		pkg_remove('openstack-dashboard')
 
@@ -461,7 +470,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 
 	
 	def _run(self):
-		pkg_install('nova-api nova-cert nova-doc nova-network nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
+		pkg_install('nova-api nova-cert nova-doc nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
 
 		self._setup_nova_config()
 
@@ -487,11 +496,11 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		# TODO: DHCP Server가 10.200.2.1로 들어가고 있음. compute-nod의 /var/lib/nova/instances/instance-00000002/libvirt.xml 를 확인...
 		#shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s --dns1 %s --gateway %s' %
 		#	(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size, self.context.private_dns1, self.context.private_gw))
-		shell(
-			'nova-manage network create private --fixed_range_v4=%s --num_networks=1 '
-			'--bridge=%s --bridge_interface=%s --network_size=%s' %
-			(self.context.private_net, self.context['network.bridge'],
-			 self.context['network.bridge_iface'], self.context.private_net_size))
+		#shell(
+			#'nova-manage network create private --fixed_range_v4=%s --num_networks=1 '
+			#'--bridge=%s --bridge_interface=%s --network_size=%s' %
+			#(self.context.private_net, self.context['network.bridge'],
+			 #self.context['network.bridge_iface'], self.context.private_net_size))
 
 		# 이전과 비슷
 		#export OS_TENANT_NAME=admin
@@ -500,7 +509,6 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
 
 		shell("service tgt restart")
-		shell("service nova-network restart")
 		shell("service nova-api restart")
 		shell("service nova-objectstore restart")
 		shell("service nova-scheduler restart")
@@ -659,6 +667,7 @@ def main():
 
 	# build runner
 	runner = Runner(config)
+	runner.append(OsInstaller())
 	for role in config['roles.%s' % get_mac().replace(':','')].split(', '):
 		try:
 			runner.append(klasses[role]())
