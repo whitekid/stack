@@ -42,13 +42,14 @@ Virtual Environment
 
 미리 설정할 것
 -------------
-VMWare는 기본적으로 vmnet이 promiscuous 모드로 동작하지 않도록 되있다. 아래처럼 promiscuous
+VMWare는 기본적으로 vmnet이 promiscuous 모드로 동작하지 않도록 되있다. 아래처럼 promiscuous로 설정
+see http://kb.vmware.com/selfservice/microsites/search.do?language=en_US&cmd=displayKC&externalId=287
 
 $ sudo chgrp `whoami` /dev/vmnet*
 $ sudo chmod g+rw `whoami` /dev/vmnet*
 
 NAT 설정
-$ sudo sysctl net.ipv4.ip_forward=0
+$ sudo sysctl net.ipv4.ip_forward=1
 $ sudo iptables -A POSTROUTING -t nat -j MASQUERADE
 
 TODO
@@ -532,6 +533,9 @@ class NovaComputeInstaller(NovaBaseInstaller):
 	role = 'compute'
 
 	def _setup(self):
+		if output("egrep -c '(vmx|svm)' /proc/cpuinfo").strip() == '0':
+			raise Exception, 'CPU hardware virtualization not enabled'
+
 		# compute depends
 		pkg_remove('nova-compute qemu-common libvirt0 open-iscsi')
 		if output('brctl show | grep -c %s' % self.context['network.bridge']).strip() == '0':
@@ -593,11 +597,15 @@ class SwiftInstaller(Installer):
 			shell('chown -R swift.swift %s/node%s' % (self.mount, i))
 
 class PrepareImageInstaller(Installer):
+	"""VM을 시작하기 위한 이미지 만들어 등록하기
+	TODO
+	* Ubuntu의 경우 cloud-init라는 패키지를 클라우드 인스턴스 초기화 및 keypair 업데이트 용으로 제공하고 있으며
+	  그 것을 이용해서 초기 이미지 만드는 것을 적용해야겠음
+	"""
 	role = 'prepare-image'
 
 	def _run(self):
 		# Create glance image
-		#
 		# 
 		# $ wget http://ftp.daum.net/ubuntu-releases/12.04/ubuntu-12.04-server-amd64.iso
 		# $ kvm-img create -f qcow2 server.qcow2 5G
@@ -662,6 +670,7 @@ def main():
 
 	# build runner
 	runner = Runner(config)
+	runner.append(OsInstaller())
 	for role in config['roles.%s' % get_mac().replace(':','')].split(', '):
 		try:
 			runner.append(klasses[role]())
