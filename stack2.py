@@ -533,6 +533,12 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 		pkg_install('nova-network')
 		self._setup_nova_config()
 
+		shell(
+			'nova-manage network create private --fixed_range_v4=%s --num_networks=1 '
+			'--bridge=%s --bridge_interface=%s --network_size=%s' %
+			(self.context.private_net, self.context['network.bridge'],
+			 self.context['network.bridge_iface'], self.context.private_net_size))
+
 		shell("service nova-network restart")
 		shell('sysctl net.ipv4.ip_forward=1')
 
