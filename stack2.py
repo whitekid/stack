@@ -96,7 +96,7 @@ class Config:
 		import ConfigParser
 
 		self._config = ConfigParser.SafeConfigParser()
-		self._config.read(os.path.dirname(sys.argv[0]) + './stack2.conf')
+		self._config.read(os.path.join(os.path.dirname(sys.argv[0]), 'stack2.conf'))
 
 	def get(self, section, key):
 		return self._config.get(section, key)
