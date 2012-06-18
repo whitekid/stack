@@ -538,6 +538,9 @@ class NovaComputeInstaller(NovaBaseInstaller):
 			shell('brctl addbr %s' % self.context['network.bridge'])
 			shell('brctl addif %s %s' % (self.context['network.bridge'], self.context['network.bridge_iface']))
 
+		shell('rm -rf /var/lib/nova/instances/*')
+
+
 	def _run(self):
 		# nova-compute의 depens
 		# cgroup-lite cpu-checker dmidecode ebtables kpartx kvm kvm-ipxe libaio1 libapparmor1 libasound2 libasyncns0 libavahi-client3 libavahi-common-data libavahi-common3 libcaca0
