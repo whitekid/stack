@@ -1,3 +1,5 @@
+stact2 is openstack installer from scratch.
+
 Prepare machine
 ===============
 all in one

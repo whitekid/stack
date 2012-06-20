@@ -449,6 +449,7 @@ class NovaBaseInstaller(Installer):
 		f.append('--flat_interface=%s' % self.context['network.bridge_iface'])
 		f.append('--flat_network_bridge=%s' % self.context['network.bridge'])
 		f.append('--fixed_range=%s' % self.context.private_net)
+		f.append('--auto_assign_floating_ip=%s' % self.context['network.auto_assign_floating_ip'])
 		#f.append('--floating_range=10.200.3.0/24')		# TODO: public ip range인데 아직은 고려하지 않음
 		f.append('--network_size=%s' % self.context.private_net_size)				# TODO: hmm...
 		f.append('--flat_network_dhcp_start=%s' % self.context.private_dhcp_start)	# TODO: hmm...
@@ -510,20 +511,6 @@ class NovaControllerInstaller(NovaBaseInstaller):
 
 		shell('nova-manage db sync')
 
-		# TODO: 여기 정확한 아키텍처 파악 필요
-		# dnsmasq가 아래처럼 동작하고 있다>
-		# /usr/sbin/dnsmasq --strict-order --bind-interfaces --conf-file= --domain=novalocal --pid-file=/var/lib/nova/networks/nova-br100.pid --listen-address=10.200.2.1 --except-interface=lo --dhcp-range=10.200.2.2,static,120s --dhcp-lease-max=32 --dhcp-hostsfile=/var/lib/nova/networks/nova-br100.conf --dhcp-script=/usr/bin/nova-dhcpbridge --leasefile-ro
-		# TODO: private : label
-		# TODO: 소스를 보자 https://github.com/openstack/nova/blob/master/bin/nova-manage
-		# TODO: DHCP Server가 10.200.2.1로 들어가고 있음. compute-nod의 /var/lib/nova/instances/instance-00000002/libvirt.xml 를 확인...
-		#shell('nova-manage network create private --fixed_range_v4=%s --num_networks=1 --bridge=%s --bridge_interface=%s --network_size=%s --dns1 %s --gateway %s' %
-		#	(self.context.private_net, self.context.bridge, self.context.bridge_iface, self.context.private_net_size, self.context.private_dns1, self.context.private_gw))
-		#shell(
-			#'nova-manage network create private --fixed_range_v4=%s --num_networks=1 '
-			#'--bridge=%s --bridge_interface=%s --network_size=%s' %
-			#(self.context.private_net, self.context['network.bridge'],
-			 #self.context['network.bridge_iface'], self.context.private_net_size))
-
 		# 이전과 비슷
 		#export OS_TENANT_NAME=admin
 		#export OS_USERNAME=admin
@@ -553,12 +540,27 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 
 	def _setup(self):
 		pkg_remove('nova-network')
+		shell('killall dmsmasq')
 		shell('sysctl net.ipv4.ip_forward=0')
 
 	def _run(self):
 		pkg_install('nova-network')
 		self._setup_nova_config()
 
+		# options
+		# http://docs.openstack.org/essex/openstack-compute/admin/content/configuring-vlan-networking.html
+		# nova-manage network create <label> [options]
+		# --fixed_range_v4	10.200.2.0/24
+		# --num_networks	1
+		#	10.200.2.0/24로 주어지고 num_networks를 3으로 지정하면
+		#	다음처럼 3개의 네트웍이 만들어 진다.
+		#	10.200.2.0/24,10.200.2.0/24, 10.200.2.0/24
+		# --network_size	주어진 CIDR의 IP 갯수
+		# --bridge
+		# --bridge_interface
+		# --multi_host=[T|F]	multihost 모드 사용
+		# --dns1, --dns2	DNS 지정
+		# --project_id=<id>	tenant ID 지정
 		shell(
 			'nova-manage network create private --fixed_range_v4=%s --num_networks=1 '
 			'--bridge=%s --bridge_interface=%s --network_size=%s' %

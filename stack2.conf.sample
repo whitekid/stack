@@ -50,6 +50,12 @@ bridge = br100
 # 위의 bridge와 연결된 interface, 즉 모든 guest traffic은 여기로 흐른다.
 bridge_iface = eth1
 
+# floating ip cidr
+floating_cidr = 10.200.3.0/24
+
+# The nova-network service can be configured to automatically allocate and
+# assign a floating IP address to virtual instances when they are launched.
+auto_assign_floating_ip = False
 
 #
 # swift
