@@ -640,7 +640,6 @@ class PrepareInstanceInstaller(Installer):
 	role = 'prepare-instance'
 
 	def _setup(self):
-		try_shell('nova-manage flavor delete --name choe.test.small')
 		try_shell('killall kvm')
 
 	def _nova_cmd(self):
@@ -653,6 +652,8 @@ class PrepareInstanceInstaller(Installer):
 	def _run(self):
 		# 테스트용 가상머신 생성
 		flavor = 9999
+		try_shell('nova-manage flavor delete --name choe.test.small')
+
 		shell('nova-manage flavor create --name choe.test.small --memory=512 --cpu=1 --root_gb=5 --ephemeral_gb=100 --flavor %s' % flavor)
 		shell('nova-manage service list')
 
