@@ -405,6 +405,7 @@ class NovaBaseInstaller(Installer):
 		f.append('--cc_host=%s' % self.context['network.control_ip'])
 		f.append('--nova_url=http://%s:8774/v1.1/' % self.context['network.control_ip'])
 		# vm traffic이 외부로 나가는데 SNAT을 수행해서 나간다. SNAT을 수행할 IP를 지정한다.
+		# 따라서 여기의 ip는 public traffic을 전달할 ip address
 		f.append('--routing_source_ip=%s' % get_ip('eth0'))
 		f.append('--glance_api_servers=%s:9292' % self.context['network.control_ip'])
 		f.append('--image_service=nova.image.glance.GlanceImageService')
