@@ -16,7 +16,7 @@ OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치
 - Host OS: Ubutu 12.04 64bit desktop
 - VMWare Network Setup
   * vmnet2: 10.200.1.0/24 for management network
-  * vmnet3: 10.200.2.0/24 for private network
+  * vmnet3: 10.200.2.0/24 for guest network
 
 - openstack-control:
   * 설치할 구성 요소: database, dashboard, nova(without compute, network), glance, swift(not done)
@@ -27,7 +27,7 @@ OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치
 
   * Network:
     * vmnet2/ eth0/ 10.200.1.10 : 관리용, see network.control_ip configuration
-    * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
+    * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 guest network의 gateway가 자동으로 설정될 것
 
 - openstack-node:
   * enable "Virtualize intel VT-x/EPT or AMD-V/RVI" option
@@ -45,7 +45,7 @@ OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치
  * HDD: as you want
  * Network:
     * vmnet2/ eth0/ 10.200.1.9 : 관리용 IP, currently we have no public traffic network. so VM traffice are SNATed by this IP.
-    * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 private network의 gateway ip로 자동으로 설정될 것
+    * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 guest network의 gateway ip로 자동으로 설정될 것
     * create bridge br100 with eth1
 
 Virtual Environment
@@ -104,11 +104,6 @@ class Config:
 	# 모든 암호는 아래로 설정된다.
 	passwd = 'choe'
 	region = 'region0'
-	private_net = '10.200.2.0/24'
-	private_net_size = 254	# ip address의 갯수
-	private_gw = '10.200.2.1'
-	private_dns1 = '168.126.63.1'
-	private_dhcp_start = '10.200.2.10'
 	bridge = 'br100'
 	bridge_iface = 'eth1'
 
@@ -448,11 +443,11 @@ class NovaBaseInstaller(Installer):
 		f.append('--public_interface=eth0')
 		f.append('--flat_interface=%s' % self.context['network.bridge_iface'])
 		f.append('--flat_network_bridge=%s' % self.context['network.bridge'])
-		f.append('--fixed_range=%s' % self.context.private_net)
+		f.append('--fixed_range=%s' % self.context['network.fixed_cidr'])
 		f.append('--auto_assign_floating_ip=%s' % self.context['network.auto_assign_floating_ip'])
 		#f.append('--floating_range=10.200.3.0/24')		# TODO: public ip range인데 아직은 고려하지 않음
-		f.append('--network_size=%s' % self.context.private_net_size)				# TODO: hmm...
-		f.append('--flat_network_dhcp_start=%s' % self.context.private_dhcp_start)	# TODO: hmm...
+		f.append('--network_size=%s' % self.context['network.fixed_size'])
+		f.append('--flat_network_dhcp_start=%s' % self.context['network.fixed_dhcp_start'])
 		f.append('--flat_injected=False')
 		#f.append('--force_dhcp_release')
 		#f.append('--iscsi_helper=tgtadm')
@@ -540,7 +535,13 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 
 	def _setup(self):
 		pkg_remove('nova-network')
-		shell('killall dmsmasq')
+		if output('nova-manage network list | grep -c %s' % self.context['network.fixed_cidr']).strip() == '1':
+			print output('nova-manage network list | grep -c %s' % self.context['network.fixed_cidr']).strip()
+			shell('nova-manage network delete %s' % self.context['network.fixed_cidr'])
+		if self.context['network.floating_cidr']:
+			try_shell('nova-manage floating delete %s' % self.context['network.floating_cidr'])
+		try_shell('killall dnsmasq')
+		try_shell('ifconfig %s 0.0.0.0' % self.context['network.bridge'])
 		shell('sysctl net.ipv4.ip_forward=0')
 
 	def _run(self):
@@ -559,13 +560,20 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 		# --bridge
 		# --bridge_interface
 		# --multi_host=[T|F]	multihost 모드 사용
+		# TODO: DNS, Gateway를 지정할 이유가 있을런지.
 		# --dns1, --dns2	DNS 지정
+		# --gateway		Not confirmed
+		# --gateway_v6		Not confirmed
 		# --project_id=<id>	tenant ID 지정
 		shell(
 			'nova-manage network create private --fixed_range_v4=%s --num_networks=1 '
 			'--bridge=%s --bridge_interface=%s --network_size=%s' %
-			(self.context.private_net, self.context['network.bridge'],
-			 self.context['network.bridge_iface'], self.context.private_net_size))
+			(self.context['network.fixed_cidr'], self.context['network.bridge'],
+			 self.context['network.bridge_iface'], self.context['network.fixed_size']))
+
+		# floating IPs
+		if self.context['network.floating_cidr']:
+			shell('nova-manage floating create %s' % self.context['network.floating_cidr'])
 
 		shell("service nova-network restart")
 		shell('sysctl net.ipv4.ip_forward=1')

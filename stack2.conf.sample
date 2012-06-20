@@ -50,6 +50,11 @@ bridge = br100
 # 위의 bridge와 연결된 interface, 즉 모든 guest traffic은 여기로 흐른다.
 bridge_iface = eth1
 
+fixed_cidr = 10.200.2.0/24
+fixed_size = 20
+fixed_dhcp_start = 10.200.2.10
+#fixed_gw =
+
 # floating ip cidr
 floating_cidr = 10.200.3.0/24
 
