@@ -19,11 +19,14 @@ OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치
   * vmnet3: 10.200.2.0/24 for private network
 
 - openstack-control:
-  * 설치할 구성 요소: database, dashboard, nova(except compute), glance, swift(not done)
+  * 설치할 구성 요소: database, dashboard, nova(without compute, network), glance, swift(not done)
   * Memory: 1G
-  * HDD: 500G x 2 (하나는 OS, 나머지 하나는 nova-volume에서 사용함)
+  * HDD:
+  	/dev/sda(500G) used by OS
+	/dev/sdb(500G) used as volume service. see volume.dev configuration
+
   * Network:
-    * vmnet2/ eth0/ 10.200.1.10 : 관리용
+    * vmnet2/ eth0/ 10.200.1.10 : 관리용, see network.control_ip configuration
     * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
 
 - openstack-node:
@@ -33,7 +36,16 @@ OpenStack을 설치하기 위해서 데스크탑에 VMWare Workstation을 설치
   * HDD: 500G (그냥 우선 대충 충분히 많게)
   * Network:
     * vmnet2/ eth0/ 10.200.1.20 : 관리용
-    * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 private networ의 gateway가 자동으로 설정될 것
+    * vmnet3/ eth1/ <none>
+    * create bridge br100 with eth1
+
+- openstack-network
+ * packages: nova-network
+ * Memory: 1G
+ * HDD: as you want
+ * Network:
+    * vmnet2/ eth0/ 10.200.1.9 : 관리용 IP, currently we have no public traffic network. so VM traffice are SNATed by this IP.
+    * vmnet3/ eth1/ <none>      : nova-network이 사용할 것으로 br100에 private network의 gateway ip로 자동으로 설정될 것
     * create bridge br100 with eth1
 
 Virtual Environment
@@ -51,6 +63,14 @@ $ sudo chmod g+rw `whoami` /dev/vmnet*
 NAT 설정
 $ sudo sysctl net.ipv4.ip_forward=1
 $ sudo iptables -A POSTROUTING -t nat -j MASQUERADE
+
+Configuration
+=============
+First you must edit stack2.conf file
+
+see carefully below items
+ * roles
+ * control_ip
 
 TODO
 ======
