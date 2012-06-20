@@ -404,7 +404,8 @@ class NovaBaseInstaller(Installer):
 		f.append('--rabbit_host=%s' % self.context['network.control_ip'])
 		f.append('--cc_host=%s' % self.context['network.control_ip'])
 		f.append('--nova_url=http://%s:8774/v1.1/' % self.context['network.control_ip'])
-		f.append('--routing_source_ip=%s' % self.context['network.control_ip'])
+		# vm traffic이 외부로 나가는데 SNAT을 수행해서 나간다. SNAT을 수행할 IP를 지정한다.
+		f.append('--routing_source_ip=%s' % get_ip('eth0'))
 		f.append('--glance_api_servers=%s:9292' % self.context['network.control_ip'])
 		f.append('--image_service=nova.image.glance.GlanceImageService')
 		f.append('--iscsi_ip_prefix=192.168.4')
@@ -523,6 +524,12 @@ class NovaControllerInstaller(NovaBaseInstaller):
 
 
 class NovaNetworkInstaller(NovaBaseInstaller):
+	""""Network Node Installer
+	network node network pre setings
+	    - eth1 must be configured with no ip addr assigned
+	    - bridge br100 will be created by nova-network
+	    - net.ipv4.ip_forward=1
+	"""
 	role = 'network'
 
 	def _setup(self):
