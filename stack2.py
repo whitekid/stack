@@ -66,7 +66,7 @@ Troubleshooting
 nova-compute에서 instance를 만들는데 에러가 나는 경우
 -----------------------------------------------------
 /var/log/nova/nova-compute.log에 "Instance already created" 와 같은 에러가 나면
-nova-scheduler에서 사용하는 amqp(rabbitmq)의 캐쉬 문제일 가능성이 있다. 재시작하고 다시 시도한다.
+nova-scheduler에서 사용하는 amqp(rtgt tgtabbitmq)의 캐쉬 문제일 가능성이 있다. 재시작하고 다시 시도한다.
 
 dashboard를 접속하는데 Internal Server Error
 --------------------------------------------
@@ -450,6 +450,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 	def _setup(self):
 		pkg_remove('nova-common')
 		pkg_remove('novnc')
+		pkg_remove('rabbitmq-server')
 		# volume depends
 		pkg_remove('tgt')
 		pkg_remove('apache2.2-common')
@@ -512,6 +513,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		#export OS_AUTH_URL="http://localhost:5000/v2.0/"
 
 		shell("service tgt restart")
+		shell("service rabbitmq-server restart")
 		shell("service nova-api restart")
 		shell("service nova-objectstore restart")
 		shell("service nova-scheduler restart")
