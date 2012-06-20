@@ -10,8 +10,13 @@
 # 000c296a6433 = os, db, keystone, glance, controller, swift, compute, prepare-image, prepare-instance
 #
 # compute 노드를 분리할 경우
-# 000c296a6433 = os, db, keystone, glance, controller, swift, prepare-image	; nova-compute를 제외한 모든 것
-# 000c29d5165f = os, compute, prepare-instance					; nova-compute
+# 000c296a6433 = db, keystone, glance, controller, swift, prepare-image	; nova-compute를 제외한 모든 것
+# 000c29d5165f = compute, prepare-instance					; nova-compute
+#
+# compute/ network 분리할 경우
+# 000c296a6433 = db, keystone, glance, controller, swift, prepare-image	; nova-compute, nova-network을 제외한 모든 것
+# 000c29d5165f = compute, prepare-instance				; nova-compute
+# 000c29cda6bd = network						; nova-network
 [roles]
 # controller
 000c296a6433 = db, keystone, glance, controller, swift, prepare-image
@@ -39,6 +44,7 @@ dev = /dev/sdb
 #
 [network]
 # controller ip
+# keystone, api등의 서비스들이 위치한 서버
 control_ip = 10.200.1.10
 
 # instance 들이 사용할 bridge 이름, br100이 openstack 기본값
