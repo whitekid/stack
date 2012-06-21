@@ -1,6 +1,11 @@
 #
 # stack2 sample configuration
 #
+[global]
+# password for all service, include database
+passwd = choe
+
+region = region0
 
 # 각 호스트에 부여할 롤을 정의
 # key: 호스트의 eth0 mac address

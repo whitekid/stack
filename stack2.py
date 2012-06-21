@@ -101,12 +101,6 @@ import time
 import inspect
 
 class Config:
-	# 모든 암호는 아래로 설정된다.
-	passwd = 'choe'
-	region = 'region0'
-	bridge = 'br100'
-	bridge_iface = 'eth1'
-
 	def __init__(self):
 		import ConfigParser
 
@@ -239,8 +233,8 @@ class DatabaseInstaller(Installer):
 		shell('rm -rf /var/lib/mysql')
 		
 	def _run(self):
-		shell("'mysql-server-5.5 mysql-server/root_password password %s' | debconf-set-selections" % self.context.passwd)
-		shell("'mysql-server-5.5 mysql-server/root_password_again password %s' | debconf-set-selections" % self.context.passwd)
+		shell("'mysql-server-5.5 mysql-server/root_password password %s' | debconf-set-selections" % self.context['global.passwd'])
+		shell("'mysql-server-5.5 mysql-server/root_password_again password %s' | debconf-set-selections" % self.context['global.passwd'])
 
 		pkg_install('mysql-server')
 		pkg_install('python-mysqldb')
@@ -248,13 +242,13 @@ class DatabaseInstaller(Installer):
 		shell("sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/my.cnf")
 		shell("service mysql restart")
 
-		shell("""mysql -uroot -e "SET PASSWORD=PASSWORD('%s')" """ % self.context.passwd)
+		shell("""mysql -uroot -e "SET PASSWORD=PASSWORD('%s')" """ % self.context['global.passwd'])
 		self.create_db('nova', 'nova')
 		self.create_db('glance', 'glance')
 		self.create_db('keystone', 'keystone')
 
 	def create_db(self, dbname, user):
-		passwd = self.context.passwd
+		passwd = self.context['global.passwd']
 		hostname = get_hostname()
 
 		shell("""mysql -uroot -p%(passwd)s -e "create database %(dbname)s;" """ % locals())
@@ -276,24 +270,24 @@ class KeystoneInstaller(Installer):
 
 	def _run(self):
 		pkg_install("keystone")
-		self.replace('/etc/keystone/keystone.conf', 'admin_token = ADMIN', 'admin_token = %s' % self.context.passwd)
+		self.replace('/etc/keystone/keystone.conf', 'admin_token = ADMIN', 'admin_token = %s' % self.context['global.passwd'])
 		self.replace('/etc/keystone/keystone.conf',
 			r'connection = sqlite:\/\/\/\/var\/lib\/keystone\/keystone.db', 
-			r'connection = mysql:\/\/keystone:%s@localhost\/keystone' % self.context.passwd)
+			r'connection = mysql:\/\/keystone:%s@localhost\/keystone' % self.context['global.passwd'])
 		shell('restart keystone')
 		shell('keystone-manage db_sync')
 
 		os.environ['SERVICE_ENDPOINT'] = 'http://localhost:35357/v2.0'
-		os.environ['SERVICE_TOKEN'] = self.context.passwd
+		os.environ['SERVICE_TOKEN'] = self.context['global.passwd']
 
 		shell('keystone tenant-create --name admin --description "Default Tenant"')
 		shell('keystone tenant-create --name service --description "Service Tenant"')
 
 		# TODO: tenant_id가 없어도 별 상관 없는 듯..
-		shell('keystone user-create --name admin --pass %s' % self.context.passwd)
-		shell('keystone user-create --name nova --pass %s' % self.context.passwd)
-		shell('keystone user-create --name glance --pass %s' % self.context.passwd)
-		shell('keystone user-create --name swift --pass %s' % self.context.passwd)
+		shell('keystone user-create --name admin --pass %s' % self.context['global.passwd'])
+		shell('keystone user-create --name nova --pass %s' % self.context['global.passwd'])
+		shell('keystone user-create --name glance --pass %s' % self.context['global.passwd'])
+		shell('keystone user-create --name swift --pass %s' % self.context['global.passwd'])
 
 		shell('keystone role-create --name admin')
 		shell('keystone role-create --name member')
@@ -319,7 +313,7 @@ class KeystoneInstaller(Installer):
 		# endpoints
 		# TODO: 여기 $(tenant_id)s가 다른 곳에서는 %(tenant_id)s인데.. 이거 python 문법 아닌가?
 		def endpoint_create(service_name, publicurl, adminurl, internalurl):
-			region = self.context.region
+			region = self.context['global.region']
 			service_id = self.get_service_id(service_name)
 			publicurl = publicurl % {'ip': self.context['network.control_ip']}
 			adminurl = adminurl % {'ip': self.context['network.control_ip']}
@@ -364,18 +358,18 @@ class GlanceInstaller(Installer):
 		self.file('/etc/glance/glance-api-paste.ini').replace(
 			'%SERVICE_TENANT_NAME%', 'service').replace(
 			'%SERVICE_USER%', 'glance').replace(
-			'%SERVICE_PASSWORD%', self.context.passwd).replace(
+			'%SERVICE_PASSWORD%', self.context['global.passwd']).replace(
 			'pipeline = versionnegotiation context apiv1app', 'pipeline = versionnegotiation autotoken context apiv1app')	#  TODO: 이 항목 없음..
 
 		self.file('/etc/glance/glance-registry-paste.ini').replace(
 			'%SERVICE_TENANT_NAME%', 'service').replace(
 			'%SERVICE_USER%', 'glance').replace(
-			'%SERVICE_PASSWORD%', self.context.passwd).replace(
+			'%SERVICE_PASSWORD%', self.context['global.passwd']).replace(
 			'pipeline = context registryapp', 'pipeline = authtoken auth-context context registryapp')	# TODO: 이 항목 없음...
 
 		self.file('/etc/glance/glance-registry.conf').replace(
 			r'connection = sqlite:\/\/\/\/var\/lib\/glance\/glance.sqlite', 
-			r'connection = mysql:\/\/glance:%s@localhost\/glance' % self.context.passwd)
+			r'connection = mysql:\/\/glance:%s@localhost\/glance' % self.context['global.passwd'])
 		self.file('/etc/glance/glance-registry.conf').append('').append(
 			'[paste_deploy]').append(
 			'flavor = keystone')
@@ -391,10 +385,10 @@ class GlanceInstaller(Installer):
 		shell('restart glance-registry')
 		time.sleep(0.5)	#  완전히 startup하기까지 조금 기다려야...
 
-		os.environ['SERVICE_TOKEN'] = self.context.passwd
+		os.environ['SERVICE_TOKEN'] = self.context['global.passwd']
 		os.environ['OS_TENANT_NAME'] = 'admin'
 		os.environ['OS_USERNAME'] = 'admin'
-		os.environ['OS_PASSWORD'] = self.context.passwd
+		os.environ['OS_PASSWORD'] = self.context['global.passwd']
 		os.environ['OS_AUTH_URL'] = "http://localhost:5000/v2.0/"
 		os.environ['SERVICE_ENDPOINT'] = 'http://localhost:35357/v2.0'
 
@@ -425,7 +419,7 @@ class NovaBaseInstaller(Installer):
 		f.append('--glance_api_servers=%s:9292' % self.context['network.control_ip'])
 		f.append('--image_service=nova.image.glance.GlanceImageService')
 		f.append('--iscsi_ip_prefix=192.168.4')
-		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context.passwd, self.context['network.control_ip']))
+		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context['global.passwd'], self.context['network.control_ip']))
 		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context['network.control_ip'])
 		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context['network.control_ip'])
 		f.append('--api_paste_config=/etc/nova/api-paste.ini')
@@ -502,7 +496,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		self.file('/etc/nova/api-paste.ini').replace(
 			'%SERVICE_TENANT_NAME%', 'service').replace(
 			'%SERVICE_USER%', 'nova').replace(
-			'%SERVICE_PASSWORD%', self.context.passwd)
+			'%SERVICE_PASSWORD%', self.context['global.passwd'])
 
 		shell('nova-manage db sync')
 
@@ -566,8 +560,8 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 		# --gateway_v6		Not confirmed
 		# --project_id=<id>	tenant ID 지정
 		shell(
-			'nova-manage network create private --fixed_range_v4=%s --num_networks=1 '
-			'--bridge=%s --bridge_interface=%s --network_size=%s' %
+			"nova-manage network create private --fixed_range_v4='%s' --num_networks=1 "
+			"--bridge=%s --bridge_interface=%s --network_size=%s" %
 			(self.context['network.fixed_cidr'], self.context['network.bridge'],
 			 self.context['network.bridge_iface'], self.context['network.fixed_size']))
 
@@ -681,7 +675,7 @@ class PrepareInstanceInstaller(Installer):
 	def _nova_cmd(self):
 		return \
 			'nova --os_username admin --os_password %s --os_tenant_name admin ' \
-			'--os_auth_url=http://%s:35357/v2.0' % (self.context.passwd, self.context['network.control_ip'])
+			'--os_auth_url=http://%s:35357/v2.0' % (self.context['global.passwd'], self.context['network.control_ip'])
 
 	def _nova(self, *args): return shell('%s %s' % (self._nova_cmd(), ' '.join(args)))
 
