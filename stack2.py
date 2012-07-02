@@ -662,8 +662,8 @@ class PrepareImageInstaller(Installer):
 			shell('wget -O %s http://192.168.100.108/isos/server.qcow2' % image)
 
 		shell('glance --os_username=admin --os_password=choe --os_tenant=admin '
-			  '--os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" '
-			  'is_public=true container_format=ovf disk_format=qcow2 < %s' % image)
+			  '--os_auth_url=http://%s:5000/v2.0 add name="Ubuntu 12.04 Server 64" '
+			  'is_public=true container_format=ovf disk_format=qcow2 < %s' % (self.context['network.control_ip'], image))
 
 
 class PrepareInstanceInstaller(Installer):
