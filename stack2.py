@@ -99,11 +99,10 @@ import subprocess
 import json
 import time
 import inspect
+import ConfigParser
 
 class Config:
 	def __init__(self):
-		import ConfigParser
-
 		self._config = ConfigParser.SafeConfigParser()
 		self._config.read(os.path.join(os.path.dirname(sys.argv[0]), 'stack2.conf'))
 
@@ -121,7 +120,7 @@ def get_ip(iface = None):
 
 def get_mac(iface = None):
 	if iface == None: iface = 'eth0'
-	return subprocess.check_output("ifconfig %s | grep HWaddr | awk '{print $5}'" % iface, shell=True).strip()
+	return subprocess.check_output("ifconfig %s | grep HWaddr | awk '{print $5}'" % iface, shell=True).strip().replace(':','')
 
 def get_hostname():
 	return subprocess.check_output('hostname').strip()
@@ -168,12 +167,12 @@ class Installer(object):
 		self._run()
 		self._teardown()
 
-	def setup(self): self._setup()
+	def setup(self):
+		self._setup()
 
 	def _setup(self): pass
 	def _run(self): pass
 	def _teardown(self): pass
-
 
 	class File:
 		def __init__(self, parent, filename):
@@ -282,6 +281,9 @@ class KeystoneInstaller(Installer):
 
 		shell('keystone tenant-create --name admin --description "Default Tenant"')
 		shell('keystone tenant-create --name service --description "Service Tenant"')
+		# create additional tenants
+		for tenant in self.context['global.tenants'].split(', '):
+			shell('keystone tenant-create --name %s --description "Tenant %s"' % (tenant, tenant))
 
 		# TODO: tenant_id가 없어도 별 상관 없는 듯..
 		shell('keystone user-create --name admin --pass %s' % self.context['global.passwd'])
@@ -301,6 +303,10 @@ class KeystoneInstaller(Installer):
 		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('swift'), self.get_role_id('admin'), self.get_tenant_id('service')))
 
 		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('swift'), self.get_role_id('member'), self.get_tenant_id('admin')))
+
+		# create additional users
+		for user in self.context['global.users'].split(', '):
+			shell('keystone user-create --name %s --pass %s' % (user, self.context['global.passwd']))
 
 		# create service
 		shell("keystone service-create --name nova --type compute --description 'OpenStack Compute Service'")
@@ -398,59 +404,108 @@ class GlanceInstaller(Installer):
 
 class NovaBaseInstaller(Installer):
 	def _setup_nova_config(self):
-		f = self.file('/etc/nova/nova.conf')
-		#f.append('--dhcpbridge_flagfile=/etc/nova/nova.conf')
-		#f.append('--dhcpbridge=/usr/bin/nova-dhcpbridge')
-		#f.append('--logdir=/var/log/nova')
-		#f.append('--state_path=/var/lib/nova')
-		#f.append('--lock_path=/run/lock/nova')
-		f.append('--allow_admin_api=true')
-		f.append('--use_deprecated_auth=false')
-		f.append('--auth_strategy=keystone')
-		f.append('--scheduler_driver=nova.scheduler.simple.SimpleScheduler')
-		f.append('--s3_host=%s' % self.context['network.control_ip'])
-		f.append('--ec2_host=%s' % self.context['network.control_ip'])
-		f.append('--rabbit_host=%s' % self.context['network.control_ip'])
-		f.append('--cc_host=%s' % self.context['network.control_ip'])
-		f.append('--nova_url=http://%s:8774/v1.1/' % self.context['network.control_ip'])
+		class NovaConfig:
+			config = '/etc/nova/nova.conf'
+
+			def __init__(self):
+				self.items = []
+				if not os.path.exists(self.config): return
+
+				f = file(self.config, 'r+')
+
+				for x in f.readlines():
+					if not x: continue
+					v = x.lstrip('-').strip().split('=')
+					if len(v) == 1: v.append('')
+					self.items.append([v[0],v[1]])
+				
+			def __del__(self):
+				f = file(self.config, 'w')
+				for k, v in self.items:
+					if v: f.write('--%s=%s\n' % (k, v))
+					else: f.write('--%s\n' % k)
+
+			def __setitem__(self, key, value):
+				keys = [x[0] for x in self.items]
+				try:
+					self.items[keys.index(key)][1] = value
+				except ValueError:
+					self.items.append([key,value])
+
+		n = NovaConfig()
+		#n['dhcpbridge_flagfile'] = '/etc/nova/nova.conf')
+		#n['dhcpbridge'] = '/usr/bin/nova-dhcpbridge')
+		#n['logdir'] = '/var/log/nova')
+		#n['state_path'] = '/var/lib/nova')
+		#n['lock_path'] = '/run/lock/nova')
+		n['allow_admin_api'] = 'true'
+		n['use_deprecated_auth'] = 'false'
+		n['auth_strategy'] = 'keystone'
+		n['scheduler_driver'] = 'nova.scheduler.simple.SimpleScheduler'
+		n['s3_host'] = self.context['network.control_ip']
+		n['ec2_host'] = self.context['network.control_ip']
+		n['rabbit_host'] = self.context['network.control_ip']
+		n['cc_host'] = self.context['network.control_ip']
+		n['nova_url'] = 'http://%s:8774/v1.1/' % self.context['network.control_ip']
 		# vm traffic이 외부로 나가는데 SNAT을 수행해서 나간다. SNAT을 수행할 IP를 지정한다.
 		# 따라서 여기의 ip는 public traffic을 전달할 ip address
-		f.append('--routing_source_ip=%s' % get_ip('eth0'))
-		f.append('--glance_api_servers=%s:9292' % self.context['network.control_ip'])
-		f.append('--image_service=nova.image.glance.GlanceImageService')
-		f.append('--iscsi_ip_prefix=192.168.4')
-		f.append('--sql_connection=mysql://nova:%s@%s/nova' % (self.context['global.passwd'], self.context['network.control_ip']))
-		f.append('--ec2_url=http://%s:8773/services/Cloud' % self.context['network.control_ip'])
-		f.append('--keystone_ec2_url=http://%s:5000/v2.0/ec2tokens' % self.context['network.control_ip'])
-		f.append('--api_paste_config=/etc/nova/api-paste.ini')
-		f.append('--libvirt_type=kvm')
-		#f.append('--libvirt_use_virtio_for_bridges=true')
-		f.append('--start_guests_on_host_boot=true')
-		f.append('--resume_guests_state_on_host_boot=true')
+		n['routing_source_ip'] = '%s' % get_ip(self.context['network.public_interface'])
+		n['glance_api_servers'] = '%s:9292' % self.context['network.control_ip']
+		n['image_service'] = 'nova.image.glance.GlanceImageService'
+		n['iscsi_ip_prefix'] = '192.168.4'
+		n['sql_connection'] = 'mysql://nova:%s@%s/nova' % (self.context['global.passwd'], self.context['network.control_ip'])
+		n['ec2_url'] = 'http://%s:8773/services/Cloud' % self.context['network.control_ip']
+		n['keystone_ec2_url'] = 'http://%s:5000/v2.0/ec2tokens' % self.context['network.control_ip']
+		n['api_paste_config'] = '/etc/nova/api-paste.ini'
+		n['libvirt_type'] = 'kvm'
+		#f.append('--libvirt_use_virtio_for_bridges'] = 'true')
+		n['start_guests_on_host_boot'] = 'true'
+		n['resume_guests_state_on_host_boot'] = 'true'
 		# vnc specific configuration
-		f.append('--novnc_enabled=true')
-		f.append('--novncproxy_base_url=http://%s:6080/vnc_auto.html' % self.context['network.control_ip'])
-		f.append('--vncserver_proxyclient_address=%s' % self.context['network.control_ip'])
-		f.append('--vncserver_listen=%s' % get_ip('eth0'))
+		n['novnc_enabled'] = 'true'
+		n['novncproxy_base_url'] = 'http://%s:6080/vnc_auto.html' % self.context['network.control_ip']
+		n['vncserver_proxyclient_address'] = self.context['network.control_ip']
+		n['vncserver_listen'] = get_ip('eth0')
 		# network specific settings
-		f.append('--network_manager=nova.network.manager.FlatDHCPManager')
-		f.append('--public_interface=eth0')
-		f.append('--flat_interface=%s' % self.context['network.bridge_iface'])
-		f.append('--flat_network_bridge=%s' % self.context['network.bridge'])
-		f.append('--fixed_range=%s' % self.context['network.fixed_cidr'])
-		f.append('--auto_assign_floating_ip=%s' % self.context['network.auto_assign_floating_ip'])
-		#f.append('--floating_range=10.200.3.0/24')		# TODO: public ip range인데 아직은 고려하지 않음
-		f.append('--network_size=%s' % self.context['network.fixed_size'])
-		f.append('--flat_network_dhcp_start=%s' % self.context['network.fixed_dhcp_start'])
-		f.append('--flat_injected=False')
-		#f.append('--force_dhcp_release')
-		#f.append('--iscsi_helper=tgtadm')
-		#f.append('--connection_type=libvirt')
-		#f.append('--root_helper=sudo nova-rootwrap')
-		#f.append('--verbose')
+		n['network_manager'] = 'nova.network.manager.FlatDHCPManager'
+		n['public_interface'] = self.context['network.public_interface']
+		n['flat_interface'] = self.context['network.bridge_iface']
+		n['flat_network_bridge'] = self.context['network.bridge']
+		try:
+			network_type = self.network_context('network_type')
+			n['multi_host'] = network_type == 'multi_host' and 'True' or 'False'
+			n['fixed_range'] = self.network_context('fixed_cidr')
+			n['network_size'] = self.network_context('fixed_size')
+			n['flat_network_dhcp_start'] = self.network_context('fixed_dhcp_start')
+			if network_type == 'physical_gateway':
+				n['dnsmasq_config_file'] = '/etc/dnsmasq-nova.conf'
+				self.file('/etc/dnsmasq-nova.conf').append(
+					'dhcp-option=option:router,%s' % self.network_context('gw'))
+		except ConfigParser.NoOptionError:
+			pass
+		n['auto_assign_floating_ip'] = self.context['network.auto_assign_floating_ip']
+		#n['floating_range'] = '10.200.3.0/24'		# TODO: public ip range인데 아직은 고려하지 않음
+		n['flat_injected'] = 'False'
+		#n['force_dhcp_release'
+		#n['iscsi_helper'] = 'tgtadm'
+		#n['connection_type'] = 'libvirt'
+		#n['root_helper'] = 'sudo nova-rootwrap'
+		n['verbose'] = ''
+		n['send_arp_for_ha'] = 'True'
+		del n
+
 
 		shell('chown -R nova:nova /etc/nova')
 		shell('chmod 644 /etc/nova/nova.conf')
+
+	def get_network_section(self):
+		host_alias = self.context['hosts.%s' % get_mac()]
+		return self.context['network.%s' % host_alias]
+	network_section = property(get_network_section)
+
+	def network_context(self, key):
+		print self.network_section, key
+		return self.context['%s.%s' % (self.network_section, key)]
 
 
 class NovaControllerInstaller(NovaBaseInstaller):
@@ -472,7 +527,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		try_shell('killall -9 epmd')
 		try_shell('killall -9 beam')
 		pkg_remove('dnsmasq-base')
-		pkg_remove('openstack-dashboard')
+		pkg_remove('python-django-horizon openstack-dashboard')
 
 		try_shell('service tgt stop')
 
@@ -517,30 +572,60 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		pkg_install('openstack-dashboard')
 		shell('service apache2 restart')
 
+		# flavor
+		try_shell('nova-manage flavor delete --name choe.test.small')
+
+		#shell('nova-manage flavor create --name choe.test.small --memory=256 --cpu=1 --root_gb=5 --ephemeral_gb=10 --flavor 9999')
+		shell('nova-manage flavor create --name choe.test.small --memory=256 --cpu=1 --root_gb=5 --ephemeral_gb=10 --flavor 9999')
+		shell('nova-manage service list')
+		shell('nova secgroup-add-rule default icmp -1 -1 0.0.0.0/0')
+		shell('nova secgroup-add-rule default tcp 22 22 0.0.0.0/0')
+
 
 class NovaNetworkInstaller(NovaBaseInstaller):
+	"""Install only nova-network packages
+	do not manupulate network settings"""
+	role = 'network'
+
+	def _setup(self):
+		pkg_remove('nova-network')
+		try_shell('rm /etc/dnsmasq-nova.conf')
+	
+		try_shell('killall dnsmasq')
+		try_shell('ifconfig %s 0.0.0.0' % self.context['network.bridge'])
+		shell('sysctl net.ipv4.ip_forward=0')
+		shell('iptables -F')
+		shell('iptables -F -t nat')
+
+	def _run(self):
+		pkg_install('nova-network')
+		self._setup_nova_config()
+
+		try_shell('rm /var/lock/nova/nova-iptables.lock')
+		shell("service nova-network restart")
+		shell('sysctl net.ipv4.ip_forward=1')
+
+
+class NovaNetworkCreateInstaller(NovaBaseInstaller):
 	""""Network Node Installer
 	network node network pre setings
 	    - eth1 must be configured with no ip addr assigned
 	    - bridge br100 will be created by nova-network
 	    - net.ipv4.ip_forward=1
 	"""
-	role = 'network'
+	role = 'create-network'
 
 	def _setup(self):
-		pkg_remove('nova-network')
-		if output('nova-manage network list | grep -c %s' % self.context['network.fixed_cidr']).strip() == '1':
-			print output('nova-manage network list | grep -c %s' % self.context['network.fixed_cidr']).strip()
-			shell('nova-manage network delete %s' % self.context['network.fixed_cidr'])
+		super(NovaNetworkCreateInstaller, self)._setup()
+
+		if output('nova-manage network list | grep -c %s' % self.network_context('fixed_cidr')).strip() == '1':
+			print output('nova-manage network list | grep -c %s' % self.network_context('fixed_cidr')).strip()
+			try_shell('nova-manage network delete %s' % self.network_context('fixed_cidr'))
 		if self.context['network.floating_cidr']:
 			try_shell('nova-manage floating delete %s' % self.context['network.floating_cidr'])
-		try_shell('killall dnsmasq')
-		try_shell('ifconfig %s 0.0.0.0' % self.context['network.bridge'])
-		shell('sysctl net.ipv4.ip_forward=0')
 
 	def _run(self):
-		pkg_install('nova-network')
-		self._setup_nova_config()
+		super(NovaNetworkCreateInstaller, self)._run()
 
 		# options
 		# http://docs.openstack.org/essex/openstack-compute/admin/content/configuring-vlan-networking.html
@@ -554,23 +639,34 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 		# --bridge
 		# --bridge_interface
 		# --multi_host=[T|F]	multihost 모드 사용
-		# TODO: DNS, Gateway를 지정할 이유가 있을런지.
+		# TODO: DNS를 지정해도 VM에서는 nova-network의 노드로 잡힌다.
+		# TODO: Gateway를 지정해도 VM에서는 nova-network가 지정된다. 단 physical_gateway 옵션을 제외하고
 		# --dns1, --dns2	DNS 지정
 		# --gateway		Not confirmed
 		# --gateway_v6		Not confirmed
 		# --project_id=<id>	tenant ID 지정
+		network_type = self.network_context('network_type')
+		multi_host = network_type == 'multi_host' and 'T' or 'F'
+		if network_type == 'physical_gateway':
+			dns_option = []
+			for i, dns in enumerate(self.network_context('dns').split(', ')[:1]):
+				dns_option.append("--dns%d=%s" % (i + 1, dns))
+			dns_option = ' '.join(dns_option)
+		else:
+			dns_option = ''
+
 		shell(
-			"nova-manage network create private --fixed_range_v4='%s' --num_networks=1 "
-			"--bridge=%s --bridge_interface=%s --network_size=%s" %
-			(self.context['network.fixed_cidr'], self.context['network.bridge'],
-			 self.context['network.bridge_iface'], self.context['network.fixed_size']))
+			"nova-manage network create %s --fixed_range_v4='%s' --num_networks=%s "
+			"--bridge=%s --bridge_interface=%s --network_size=%s --multi_host=%s %s" %
+			(self.network_context('name'), self.network_context('fixed_cidr'),
+			 self.network_context('num_networks'), self.context['network.bridge'],
+			 self.context['network.bridge_iface'], self.network_context('fixed_size'),
+			 multi_host, dns_option)
+		)
 
 		# floating IPs
 		if self.context['network.floating_cidr']:
 			shell('nova-manage floating create %s' % self.context['network.floating_cidr'])
-
-		shell("service nova-network restart")
-		shell('sysctl net.ipv4.ip_forward=1')
 
 
 class NovaComputeInstaller(NovaBaseInstaller):
@@ -651,26 +747,32 @@ class PrepareImageInstaller(Installer):
 	def _run(self):
 		# Create glance image
 		# 
+		def glance_register(url, name):
+			filename = os.path.basename(url)
+			if not os.path.exists(filename):
+				shell('wget -O %s %s' % (filename, url))
+
+			shell('glance --os_username=admin --os_password=choe --os_tenant=admin '
+				  '--os_auth_url=http://%s:5000/v2.0 add name="%s" '
+				  'is_public=true container_format=ovf disk_format=qcow2 < %s' % (self.context['network.control_ip'], name, filename))
+
+		# Custom Cloud Image
 		# $ wget http://ftp.daum.net/ubuntu-releases/12.04/ubuntu-12.04-server-amd64.iso
 		# $ kvm-img create -f qcow2 server.qcow2 5G
 		# $ sudo kvm -m 256 -cdrom ubuntu-12.04-server-amd64.iso -drive file=server.qcow2,if=virtio,index=0 -boot d -net nic -net user -nographic  -vnc :0
 		# install ubuntu sever using gvncviewr <ip>:0
 		# this installed image placed at http://192.168.100.108/isos/server.qcow2
 		# $ glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://10.200.1.10:5000/v2.0 add name="Ubuntu 12.04 Server 64" is_public=true container_format=ovf disk_format=qcow2 < server.qcow2
-		image = 'ubuntu-12.04.qcow2'
-		if not os.path.exists(image):
-			shell('wget -O %s http://192.168.100.108/isos/server.qcow2' % image)
+		glance_register('http://192.168.100.108/isos/server.qcow2', 'Ubuntu 12.04 Server 64bit')
 
-		shell('glance --os_username=admin --os_password=choe --os_tenant=admin '
-			  '--os_auth_url=http://%s:5000/v2.0 add name="Ubuntu 12.04 Server 64" '
-			  'is_public=true container_format=ovf disk_format=qcow2 < %s' % (self.context['network.control_ip'], image))
+		# Ubuntu Cloud Image
+		# http://uec-images.ubuntu.com/precise/current/precise-server-cloudimg-amd64-disk1.img
+		# see http://docs.openstack.org/essex/openstack-compute/admin/content/starting-images.html
+		#glance_register('http://uec-images.ubuntu.com/precise/current/precise-server-cloudimg-amd64-disk1.img', 'Ubuntu CloudImage 12.04 Server 64bit')
 
 
-class PrepareInstanceInstaller(Installer):
-	role = 'prepare-instance'
-
-	def _setup(self):
-		try_shell('killall kvm')
+class CreateSampleInstanceInstaller(Installer):
+	role = 'create-sample-instance'
 
 	def _nova_cmd(self):
 		return \
@@ -681,19 +783,13 @@ class PrepareInstanceInstaller(Installer):
 
 	def _run(self):
 		# 테스트용 가상머신 생성
-		flavor = 9999
-		try_shell('nova-manage flavor delete --name choe.test.small')
-
-		shell('nova-manage flavor create --name choe.test.small --memory=512 --cpu=1 --root_gb=5 --ephemeral_gb=100 --flavor %s' % flavor)
-		shell('nova-manage service list')
-
-		def get_image(): return output("%s image-list| grep ACTIVE | awk '{print $2}'" % (self._nova_cmd())).strip()
+		def get_image(): return output("%s image-list | grep ACTIVE | head -1 | awk '{print $2}'" % (self._nova_cmd())).strip()
 
 		self._nova('image-list')
 		try: self._nova('keypair-delete test')
 		except: pass
 		self._nova('keypair-add test > test.pem')
-		self._nova('boot --flavor %s --image %s test' % (flavor, get_image()))
+		self._nova('boot --flavor 9999 --image %s test' % get_image())
 		self._nova('list')
 
 def get_classes(module):
@@ -716,7 +812,7 @@ def main():
 	# build runner
 	runner = Runner(config)
 	runner.append(OsInstaller())
-	for role in config['roles.%s' % get_mac().replace(':','')].split(', '):
+	for role in config['roles.%s' % config['hosts.%s' % get_mac()]].split(', '):
 		try:
 			runner.append(klasses[role]())
 		except IndexError, e:
