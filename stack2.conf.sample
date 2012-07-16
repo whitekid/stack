@@ -64,15 +64,18 @@ bridge_iface = eth1
 public_interface = eth2
 
 # 이 network 노드에서 설정할 네트웍을 지정한다.
-compute = network_separated_nova_network
-network = network_separated_nova_network
+compute0 = network_separated_nova_network
+network0 = network_separated_nova_network
+compute1 = network_separated_nova_network
+compute2 = network_separated_nova_network
+compute3 = network_separated_nova_network
 
 # floating ip cidr
 floating_cidr = 10.200.0.0/24
 
 # The nova-network service can be configured to automatically allocate and
 # assign a floating IP address to virtual instances when they are launched.
-auto_assign_floating_ip = True
+auto_assign_floating_ip = False
 
 [network_separated_nova_network]
 name = separated_nova_network

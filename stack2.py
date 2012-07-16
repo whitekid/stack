@@ -106,13 +106,15 @@ class Config:
 		self._config = ConfigParser.SafeConfigParser()
 		self._config.read(os.path.join(os.path.dirname(sys.argv[0]), 'stack2.conf'))
 
-	def get(self, section, key):
+	def _get(self, section, key):
 		return self._config.get(section, key)
 
 	def __getitem__(self, key):
-		key, value = key.split('.')
-		return self.get(key, value)
+		return self.get(key)
 
+	def get(self, key, default=None):
+		key, value = key.split('.')
+		return self._get(key, value)
 
 def get_ip(iface = None):
 	if iface == None: iface = 'eth0'
@@ -162,22 +164,25 @@ def pkg_install(pkg):
 class Installer(object):
 	role = None
 
-	def run(self):
-		self._setup()
-		self._run()
-		self._teardown()
-
 	def setup(self):
+		self._cleanup()
 		self._setup()
+
+	def cleanup(self):
+		self._cleanup()
+
+	def _cleanup(self):
+		pass
 
 	def _setup(self): pass
-	def _run(self): pass
-	def _teardown(self): pass
 
 	class File:
 		def __init__(self, parent, filename):
 			self.parent = parent
 			self.filename = filename
+
+		def __enter__(self): return self
+		def __exit__(self, type, value, traceback): pass
 
 		def replace(self, orig, rep):
 			shell("sed -i 's/%s/%s/g' %s" % (orig, rep, self.filename))
@@ -196,6 +201,9 @@ class Installer(object):
 	def file(self, filename):
 		return self.File(self, filename)
 
+	def _get_with_quantum(self): return bool(self.context['network.with_quantum'])
+	with_quantum = property(_get_with_quantum)
+
 
 class Runner:
 	def __init__(self, context):
@@ -207,31 +215,35 @@ class Runner:
 		self._installer.append(installer)
 		return self
 
-	def run(self, what_to_run=None):
+	def setup(self, what_to_run=None):
+		if not what_to_run: what_to_run = 'setup'
+
 		for installer in self._installer:
-			if what_to_run == 'setup':
-				installer.setup()
-			else:
-				installer.run()
+			func = getattr(installer, what_to_run)
+			func()
+			#if what_to_run == 'cleanup':
+				#installer.cleanup()
+			#else:
+				#installer.setup()
 
 class OsInstaller(Installer):
 	role = 'os'
 
-	def _setup(self):
+	def _cleanup(self):
 		pkg_remove('ntp')
 
-	def _run(self):
+	def _setup(self):
 		pkg_install('ntp')
 
 
 class DatabaseInstaller(Installer):
 	role = 'db'
 
-	def _setup(self):
+	def _cleanup(self):
 		pkg_remove('mysql-common')
 		shell('rm -rf /var/lib/mysql')
 		
-	def _run(self):
+	def _setup(self):
 		shell("'mysql-server-5.5 mysql-server/root_password password %s' | debconf-set-selections" % self.context['global.passwd'])
 		shell("'mysql-server-5.5 mysql-server/root_password_again password %s' | debconf-set-selections" % self.context['global.passwd'])
 
@@ -245,6 +257,7 @@ class DatabaseInstaller(Installer):
 		self.create_db('nova', 'nova')
 		self.create_db('glance', 'glance')
 		self.create_db('keystone', 'keystone')
+		if self.with_quantum: self.create_db('ovs_quantum', 'ovs_quantum')
 
 	def create_db(self, dbname, user):
 		passwd = self.context['global.passwd']
@@ -258,7 +271,7 @@ class DatabaseInstaller(Installer):
 class KeystoneInstaller(Installer):
 	role = 'keystone'
 
-	def _setup(self):
+	def _cleanup(self):
 		pkg_remove("keystone")
 		shell('rm -rf /var/lib/keystone')
 
@@ -267,7 +280,7 @@ class KeystoneInstaller(Installer):
 		try: del os.environ['SERVICE_TOKEN']
 		except: pass
 
-	def _run(self):
+	def _setup(self):
 		pkg_install("keystone")
 		self.replace('/etc/keystone/keystone.conf', 'admin_token = ADMIN', 'admin_token = %s' % self.context['global.passwd'])
 		self.replace('/etc/keystone/keystone.conf',
@@ -283,7 +296,7 @@ class KeystoneInstaller(Installer):
 		shell('keystone tenant-create --name service --description "Service Tenant"')
 		# create additional tenants
 		for tenant in self.context['global.tenants'].split(', '):
-			shell('keystone tenant-create --name %s --description "Tenant %s"' % (tenant, tenant))
+			if tenant: shell('keystone tenant-create --name %s --description "Tenant %s"' % (tenant, tenant))
 
 		# TODO: tenant_id가 없어도 별 상관 없는 듯..
 		shell('keystone user-create --name admin --pass %s' % self.context['global.passwd'])
@@ -302,11 +315,21 @@ class KeystoneInstaller(Installer):
 		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('glance'), self.get_role_id('admin'), self.get_tenant_id('service')))
 		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('swift'), self.get_role_id('admin'), self.get_tenant_id('service')))
 
-		shell('keystone user-role-add --user %s --role %s --tenant_id=%s' % (self.get_user_id('swift'), self.get_role_id('member'), self.get_tenant_id('admin')))
+
+		#def role_add(user, role, tenant):
+		#	shell('keystone user-role-add --user %s --role %s --tenant_id=%s' %
+		#		(self.get_user_id(user), self.get_role_id(role), self.get_tenant_id(tenant)))
+		#
+		#role_add('admin', 'admin', 'admin')
+		#role_add('admin', 'member', 'admin')
+		#role_add('nova', 'admin', 'service')
+		#role_add('glance', 'admin', 'service')
+		#role_add('swift', 'admin', 'service')
+		#role_add('swift', 'member', 'admin')
 
 		# create additional users
 		for user in self.context['global.users'].split(', '):
-			shell('keystone user-create --name %s --pass %s' % (user, self.context['global.passwd']))
+			if user: shell('keystone user-create --name %s --pass %s' % (user, self.context['global.passwd']))
 
 		# create service
 		shell("keystone service-create --name nova --type compute --description 'OpenStack Compute Service'")
@@ -348,9 +371,10 @@ class KeystoneInstaller(Installer):
 class GlanceInstaller(Installer):
 	role = 'glance'
 
-	def _setup(self):
+	def _cleanup(self):
 		pkg_remove('glance-common')
 		shell('rm -rf /var/lib/glance*')
+		shell('rm -rf /var/log/glance*')
 
 		#del os.environ['SERVICE_TOKEN']
 		#del os.environ['OS_TENANT_NAME']
@@ -359,7 +383,7 @@ class GlanceInstaller(Installer):
 		#del os.environ['OS_AUTH_URL']
 		#del os.environ['SERVICE_ENDPOINT']
 
-	def _run(self):
+	def _setup(self):
 		pkg_install('glance')
 		self.file('/etc/glance/glance-api-paste.ini').replace(
 			'%SERVICE_TENANT_NAME%', 'service').replace(
@@ -387,23 +411,23 @@ class GlanceInstaller(Installer):
 		shell('glance-manage version_control 0')
 		shell('glance-manage db_sync')
 
-		shell('restart glance-api')
-		shell('restart glance-registry')
+		shell('service glance-api restart')
+		shell('service glance-registry restart')
 		time.sleep(0.5)	#  완전히 startup하기까지 조금 기다려야...
 
 		os.environ['SERVICE_TOKEN'] = self.context['global.passwd']
 		os.environ['OS_TENANT_NAME'] = 'admin'
 		os.environ['OS_USERNAME'] = 'admin'
 		os.environ['OS_PASSWORD'] = self.context['global.passwd']
-		os.environ['OS_AUTH_URL'] = "http://localhost:5000/v2.0/"
-		os.environ['SERVICE_ENDPOINT'] = 'http://localhost:35357/v2.0'
+		os.environ['OS_AUTH_URL'] = "http://%s:5000/v2.0/" % self.context['network.control_ip']
+		os.environ['SERVICE_ENDPOINT'] = 'http://%s:35357/v2.0' % self.context['network.control_ip']
 
 		shell('glance index')
 		#shell('glance --os_username=admin --os_password=choe --os_tenant=admin --os_auth_url=http://localhost:5000/v2.0 index')
 
 
 class NovaBaseInstaller(Installer):
-	def _setup_nova_config(self):
+	def _nova_config(self):
 		class NovaConfig:
 			config = '/etc/nova/nova.conf'
 
@@ -419,6 +443,9 @@ class NovaBaseInstaller(Installer):
 					if len(v) == 1: v.append('')
 					self.items.append([v[0],v[1]])
 				
+			def __enter__(self): return self
+			def __exit__(self, type, value, traceback): pass
+
 			def __del__(self):
 				f = file(self.config, 'w')
 				for k, v in self.items:
@@ -432,68 +459,82 @@ class NovaBaseInstaller(Installer):
 				except ValueError:
 					self.items.append([key,value])
 
-		n = NovaConfig()
-		#n['dhcpbridge_flagfile'] = '/etc/nova/nova.conf')
-		#n['dhcpbridge'] = '/usr/bin/nova-dhcpbridge')
-		#n['logdir'] = '/var/log/nova')
-		#n['state_path'] = '/var/lib/nova')
-		#n['lock_path'] = '/run/lock/nova')
-		n['allow_admin_api'] = 'true'
-		n['use_deprecated_auth'] = 'false'
-		n['auth_strategy'] = 'keystone'
-		n['scheduler_driver'] = 'nova.scheduler.simple.SimpleScheduler'
-		n['s3_host'] = self.context['network.control_ip']
-		n['ec2_host'] = self.context['network.control_ip']
-		n['rabbit_host'] = self.context['network.control_ip']
-		n['cc_host'] = self.context['network.control_ip']
-		n['nova_url'] = 'http://%s:8774/v1.1/' % self.context['network.control_ip']
-		# vm traffic이 외부로 나가는데 SNAT을 수행해서 나간다. SNAT을 수행할 IP를 지정한다.
-		# 따라서 여기의 ip는 public traffic을 전달할 ip address
-		n['routing_source_ip'] = '%s' % get_ip(self.context['network.public_interface'])
-		n['glance_api_servers'] = '%s:9292' % self.context['network.control_ip']
-		n['image_service'] = 'nova.image.glance.GlanceImageService'
-		n['iscsi_ip_prefix'] = '192.168.4'
-		n['sql_connection'] = 'mysql://nova:%s@%s/nova' % (self.context['global.passwd'], self.context['network.control_ip'])
-		n['ec2_url'] = 'http://%s:8773/services/Cloud' % self.context['network.control_ip']
-		n['keystone_ec2_url'] = 'http://%s:5000/v2.0/ec2tokens' % self.context['network.control_ip']
-		n['api_paste_config'] = '/etc/nova/api-paste.ini'
-		n['libvirt_type'] = 'kvm'
-		#f.append('--libvirt_use_virtio_for_bridges'] = 'true')
-		n['start_guests_on_host_boot'] = 'true'
-		n['resume_guests_state_on_host_boot'] = 'true'
-		# vnc specific configuration
-		n['novnc_enabled'] = 'true'
-		n['novncproxy_base_url'] = 'http://%s:6080/vnc_auto.html' % self.context['network.control_ip']
-		n['vncserver_proxyclient_address'] = self.context['network.control_ip']
-		n['vncserver_listen'] = get_ip('eth0')
-		# network specific settings
-		n['network_manager'] = 'nova.network.manager.FlatDHCPManager'
-		n['public_interface'] = self.context['network.public_interface']
-		n['flat_interface'] = self.context['network.bridge_iface']
-		n['flat_network_bridge'] = self.context['network.bridge']
-		try:
-			network_type = self.network_context('network_type')
-			n['multi_host'] = network_type == 'multi_host' and 'True' or 'False'
-			n['fixed_range'] = self.network_context('fixed_cidr')
-			n['network_size'] = self.network_context('fixed_size')
-			n['flat_network_dhcp_start'] = self.network_context('fixed_dhcp_start')
-			if network_type == 'physical_gateway':
-				n['dnsmasq_config_file'] = '/etc/dnsmasq-nova.conf'
-				self.file('/etc/dnsmasq-nova.conf').append(
-					'dhcp-option=option:router,%s' % self.network_context('gw'))
-		except ConfigParser.NoOptionError:
-			pass
-		n['auto_assign_floating_ip'] = self.context['network.auto_assign_floating_ip']
-		#n['floating_range'] = '10.200.3.0/24'		# TODO: public ip range인데 아직은 고려하지 않음
-		n['flat_injected'] = 'False'
-		#n['force_dhcp_release'
-		#n['iscsi_helper'] = 'tgtadm'
-		#n['connection_type'] = 'libvirt'
-		#n['root_helper'] = 'sudo nova-rootwrap'
-		n['verbose'] = ''
-		n['send_arp_for_ha'] = 'True'
-		del n
+		with NovaConfig() as n:
+			#n['dhcpbridge_flagfile'] = '/etc/nova/nova.conf')
+			#n['dhcpbridge'] = '/usr/bin/nova-dhcpbridge')
+			#n['logdir'] = '/var/log/nova')
+			#n['state_path'] = '/var/lib/nova')
+			#n['lock_path'] = '/run/lock/nova')
+			n['allow_admin_api'] = 'true'
+			n['use_deprecated_auth'] = 'false'
+			n['auth_strategy'] = 'keystone'
+			n['scheduler_driver'] = 'nova.scheduler.simple.SimpleScheduler'
+			n['s3_host'] = self.context['network.control_ip']
+			n['ec2_host'] = self.context['network.control_ip']
+			n['rabbit_host'] = self.context['network.control_ip']
+			n['cc_host'] = self.context['network.control_ip']
+			n['nova_url'] = 'http://%s:8774/v1.1/' % self.context['network.control_ip']
+			# vm traffic이 외부로 나가는데 SNAT을 수행해서 나간다. SNAT을 수행할 IP를 지정한다.
+			# 따라서 여기의 ip는 public traffic을 전달할 ip address
+			n['routing_source_ip'] = '%s' % get_ip(self.context['network.public_interface'])
+			n['glance_api_servers'] = '%s:9292' % self.context['network.control_ip']
+			n['image_service'] = 'nova.image.glance.GlanceImageService'
+			n['iscsi_ip_prefix'] = '192.168.4'
+			n['sql_connection'] = 'mysql://nova:%s@%s/nova' % (self.context['global.passwd'], self.context['network.control_ip'])
+			n['ec2_url'] = 'http://%s:8773/services/Cloud' % self.context['network.control_ip']
+			n['keystone_ec2_url'] = 'http://%s:5000/v2.0/ec2tokens' % self.context['network.control_ip']
+			n['api_paste_config'] = '/etc/nova/api-paste.ini'
+			n['libvirt_type'] = 'kvm'
+			#f.append('--libvirt_use_virtio_for_bridges'] = 'true')
+			n['start_guests_on_host_boot'] = 'true'
+			n['resume_guests_state_on_host_boot'] = 'true'
+			# vnc specific configuration
+			n['novnc_enabled'] = 'true'
+			n['novncproxy_base_url'] = 'http://%s:6080/vnc_auto.html' % self.context['network.control_ip']
+			n['vncserver_proxyclient_address'] = self.context['network.control_ip']
+			n['vncserver_listen'] = get_ip('eth0')
+			# network specific settings
+			n['network_manager'] = 'nova.network.manager.FlatDHCPManager'
+			n['public_interface'] = self.context['network.public_interface']
+			n['flat_interface'] = self.context['network.bridge_iface']
+			n['flat_network_bridge'] = self.context['network.bridge']
+			try:
+				network_type = self.network_context('network_type')
+				n['multi_host'] = network_type == 'multi_host' and 'True' or 'False'
+				n['fixed_range'] = self.network_context('fixed_cidr')
+				n['network_size'] = self.network_context('fixed_size')
+				n['flat_network_dhcp_start'] = self.network_context('fixed_dhcp_start')
+				if network_type == 'physical_gateway':
+					n['dnsmasq_config_file'] = '/etc/dnsmasq-nova.conf'
+					self.file('/etc/dnsmasq-nova.conf').append(
+						'dhcp-option=option:router,%s' % self.network_context('gw'))
+			except ConfigParser.NoOptionError:
+				pass
 
+			if self.with_quantum:
+				if self.role in ('network', 'compute'):
+					n['network_manager'] = 'nova.network.quantum.manager.QuantumManager'
+
+					if self.role == 'network':
+						n['linuxnet_interface_driver'] = 'nova.network.linux_net.LinuxOVSInterfaceDriver'
+						n['linuxnet_ovs_integration_bridge'] = self.context['network.bridge']
+						n['quantum_connection_host'] = self.context['network.control_ip']
+						#n['quantum_connection_port'] = 9393
+						n['quantum_use_dhcp'] = True
+					if self.role == 'compute':
+						n['libvirt_ovs_bridge'] = self.context['network.bridge']
+						n['libvirt_vif_type'] = 'ethernet'
+						n['libvirt_vif_driver'] = 'nova.virt.libvirt.vif.LibvirtOpenVswitchDriver'
+
+			n['auto_assign_floating_ip'] = self.context['network.auto_assign_floating_ip']
+			#n['floating_range'] = '10.200.3.0/24'		# TODO: public ip range인데 아직은 고려하지 않음
+			n['flat_injected'] = 'False'
+			#n['force_dhcp_release'
+			#n['iscsi_helper'] = 'tgtadm'
+			#n['connection_type'] = 'libvirt'
+			#n['root_helper'] = 'sudo nova-rootwrap'
+			n['verbose'] = ''
+			n['send_arp_for_ha'] = 'True'
 
 		shell('chown -R nova:nova /etc/nova')
 		shell('chmod 644 /etc/nova/nova.conf')
@@ -507,12 +548,45 @@ class NovaBaseInstaller(Installer):
 		print self.network_section, key
 		return self.context['%s.%s' % (self.network_section, key)]
 
+	def _cleanup_bridge(self):
+		# LinuxBridge인 경우는 nova-network이 자동으로 만들고 관리하지만 OVS는 하지 않아서 직접 해야한다
+		bridge = self.context['network.bridge']
+
+		if self.with_quantum:
+			if output(r'ovs-vsctl list-br | grep -c %s' % bridge).strip() == '1':
+				shell(r'ovs-vsctl del-br %s' % bridge)
+
+		else:
+			if output('brctl show | grep -c %s' % bridge).strip() != '0':
+				shell('ifconfig %s down' % bridge)
+				shell('brctl delbr %s' % bridge)
+
+	def _setup_bridge(self):
+		bridge = self.context['network.bridge']
+
+		if self.with_quantum:
+			shell('ovs-vsctl add-br %s' % bridge)
+			shell('ovs-vsctl add-port %s %s' % (bridge, self.context['network.bridge_iface']))
+
+		else:
+			shell('brctl addbr %s' % bridge)
+			shell('brctl addif %s %s' % (bridge, self.context['network.bridge_iface']))
+
+		shell('ifconfig %s ups' % bridge)
+
+	def _setup_quantum_plugin(self):
+		with self.file('/etc/quantum/plugins/openvswitch/ovs_quantum_plugin.ini') as f:
+			f.replace(
+				'sql_connection = sqlite:\/\/',
+				'sql_connection = mysql:\/\/ovs_quantum:%s@%s:3306\/ovs_quantum' % (self.context['global.passwd'], self.context['network.control_ip']))
+			f.replace('integration-bridge = br-int', 'integration-bridge = %s' % self.context['network.bridge'])
+
 
 class NovaControllerInstaller(NovaBaseInstaller):
 	"""controller installation"""
 	role = 'controller'
 
-	def _setup(self):
+	def _cleanup(self):
 		pkg_remove('nova-common')
 		pkg_remove('novnc')
 		pkg_remove('rabbitmq-server')
@@ -520,6 +594,9 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		pkg_remove('tgt')
 		pkg_remove('apache2.2-common')
 		pkg_remove('memcached')
+		if self.with_quantum:
+			pkg_remove('openvswitch-datapath-dkms python-quantum python-quantumclient quantum-server')
+
 		try_shell('service memcached restart')	# openstack-dashboard에서 사용하는데.. 캐쉬 문제로 에러가 발생하는 경우가 있음
 		try_shell('service rabbitmq-server restart')
 		try_shell('killall -9 dnsmasq')
@@ -536,10 +613,11 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		shell('rm -rf /var/lib/nova')
 
 	
-	def _run(self):
+	def _setup(self):
 		pkg_install('nova-api nova-cert nova-doc nova-objectstore nova-scheduler nova-volume rabbitmq-server novnc nova-consoleauth')
+		if self.with_quantum: pkg_install('quantum-server quantum-plugin-openvswitch')
 
-		self._setup_nova_config()
+		self._nova_config()
 
 		# nova-volumes 이름을 가진 lvm volume group이 있어야한다.
 		shell('pvcreate %s' % self.context['volume.dev'])
@@ -552,6 +630,16 @@ class NovaControllerInstaller(NovaBaseInstaller):
 			'%SERVICE_TENANT_NAME%', 'service').replace(
 			'%SERVICE_USER%', 'nova').replace(
 			'%SERVICE_PASSWORD%', self.context['global.passwd'])
+
+		if self.with_quantum:
+			with self.file('/etc/quantum/plugins.ini') as f:
+				f.replace(
+					'provider = quantum.plugins.sample.SamplePlugin.FakePlugin',
+					'provider = quantum.plugins.openvswitch.ovs_quantum_plugin.OVSQuantumPlugin')
+
+			self._setup_quantum_plugin()
+
+			shell('service quantum-server restart')
 
 		shell('nova-manage db sync')
 
@@ -578,6 +666,7 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		#shell('nova-manage flavor create --name choe.test.small --memory=256 --cpu=1 --root_gb=5 --ephemeral_gb=10 --flavor 9999')
 		shell('nova-manage flavor create --name choe.test.small --memory=256 --cpu=1 --root_gb=5 --ephemeral_gb=10 --flavor 9999')
 		shell('nova-manage service list')
+
 		shell('nova secgroup-add-rule default icmp -1 -1 0.0.0.0/0')
 		shell('nova secgroup-add-rule default tcp 22 22 0.0.0.0/0')
 
@@ -587,9 +676,14 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 	do not manupulate network settings"""
 	role = 'network'
 
-	def _setup(self):
+	def _cleanup(self):
+		self._cleanup_bridge()
+
 		pkg_remove('nova-network')
 		try_shell('rm /etc/dnsmasq-nova.conf')
+		if self.with_quantum:
+			pkg_remove('openvswitch-datapath-dkms openvswitch-common')
+			try_shell('rm -rf /etc/openvswitch')
 	
 		try_shell('killall dnsmasq')
 		try_shell('ifconfig %s 0.0.0.0' % self.context['network.bridge'])
@@ -597,11 +691,18 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 		shell('iptables -F')
 		shell('iptables -F -t nat')
 
-	def _run(self):
+	def _setup(self):
 		pkg_install('nova-network')
-		self._setup_nova_config()
+		if self.with_quantum: pkg_install('quantum-plugin-openvswitch')
+		self._nova_config()
 
 		try_shell('rm /var/lock/nova/nova-iptables.lock')
+		if self.with_quantum:
+			shell("service openvswitch-switch restart")
+			self._setup_quantum_plugin()
+
+		self._setup_bridge()
+
 		shell("service nova-network restart")
 		shell('sysctl net.ipv4.ip_forward=1')
 
@@ -615,17 +716,15 @@ class NovaNetworkCreateInstaller(NovaBaseInstaller):
 	"""
 	role = 'create-network'
 
-	def _setup(self):
-		super(NovaNetworkCreateInstaller, self)._setup()
+	def _cleanup(self):
+		super(NovaNetworkCreateInstaller, self)._cleanup()
 
-		if output('nova-manage network list | grep -c %s' % self.network_context('fixed_cidr')).strip() == '1':
-			print output('nova-manage network list | grep -c %s' % self.network_context('fixed_cidr')).strip()
-			try_shell('nova-manage network delete %s' % self.network_context('fixed_cidr'))
+		try_shell("nova-manage network list | tail -n +2 | awk '{print $9}' | xargs -L1 nova-manage network delete --uuid ")
 		if self.context['network.floating_cidr']:
 			try_shell('nova-manage floating delete %s' % self.context['network.floating_cidr'])
 
-	def _run(self):
-		super(NovaNetworkCreateInstaller, self)._run()
+	def _setup(self):
+		super(NovaNetworkCreateInstaller, self)._setup()
 
 		# options
 		# http://docs.openstack.org/essex/openstack-compute/admin/content/configuring-vlan-networking.html
@@ -672,44 +771,58 @@ class NovaNetworkCreateInstaller(NovaBaseInstaller):
 class NovaComputeInstaller(NovaBaseInstaller):
 	role = 'compute'
 
-	def _setup(self):
+	def _cleanup(self):
 		if output("egrep -c '(vmx|svm)' /proc/cpuinfo").strip() == '0':
 			raise Exception, 'CPU hardware virtualization not enabled'
 
+		self._cleanup_bridge()
+
 		# compute depends
 		pkg_remove('nova-compute qemu-common libvirt0 open-iscsi')
-		if output('brctl show | grep -c %s' % self.context['network.bridge']).strip() == '0':
-			shell('brctl addbr %s' % self.context['network.bridge'])
-			shell('brctl addif %s %s' % (self.context['network.bridge'], self.context['network.bridge_iface']))
+		if self.with_quantum:
+			pkg_remove('openvswitch-datapath-dkms openvswitch-common')
+			try_shell("kill -9 `ps ax | grep quantum-openvswitch-agent | grep -v grep | awk '{print $1}'`")
 
 		shell('rm -rf /var/lib/nova/instances/*')
 
 
-	def _run(self):
-		# nova-compute의 depens
-		# cgroup-lite cpu-checker dmidecode ebtables kpartx kvm kvm-ipxe libaio1 libapparmor1 libasound2 libasyncns0 libavahi-client3 libavahi-common-data libavahi-common3 libcaca0
-		# libflac8 libjson0 libnspr4 libnss3 libnuma1 libogg0 libpulse0 librados2 librbd1 libsdl1.2debian libsndfile1 libvirt-bin libvirt0 libvorbis0a libvorbisenc2 libxenstore3.0
-		# libxml2-utils libyajl1 msr-tools nova-compute-kvm open-iscsi open-iscsi-utils python-libvirt qemu-common qemu-kvm qemu-utils seabios vgabios
+	def _setup(self):
+		pkg_install('ntp')
 
 		pkg_install('nova-compute')
 		pkg_install('python-mysqldb')
 		shell('kvm-ok')
 		pkg_remove('dmidecode')	# 이 패키지가 설치되면 kvm이 서비스가 정상작동하지 않음, 아마 ubuntu vm의 문제일 듯..
+
+		self._nova_config()
+		if self.with_quantum:
+			pkg_install('quantum-plugin-openvswitch quantum-plugin-openvswitch-agent')
+			self._setup_quantum_plugin()
+
+			self.file('/etc/libvirt/qemu.conf').append("""cgroup_device_acl = [
+    "/dev/null", "/dev/full", "/dev/zero",
+    "/dev/random", "/dev/urandom",
+    "/dev/ptmx", "/dev/kvm", "/dev/kqemu",
+    "/dev/rtc", "/dev/hpet", "/dev/net/tun",
+]""")
+
 		shell('service libvirt-bin restart')
-
-		pkg_install('ntp')
-
-		self._setup_nova_config()
-
+		if self.with_quantum:
+			shell('service openvswitch-switch restart')
 		shell('service open-iscsi restart')
 		shell('service nova-compute restart')
 		shell('nova-manage service list')
+
+		self._setup_bridge()
+
+		if self.with_quantum:
+			shell('quantum-openvswitch-agent /etc/quantum/plugins/openvswitch/ovs_quantum_plugin.ini &')
 
 
 class SwiftInstaller(Installer):
 	role = 'swift'
 
-	def _setup(self):
+	def _cleanup(self):
 		pkg_remove('swift swift-proxy swift-account swift-container swift-object')
 		pkg_remove('xfsprogs')
 
@@ -717,7 +830,7 @@ class SwiftInstaller(Installer):
 		self.mount = self.context['swift.mount']
 		try_shell('umount %s' % self.mount)
 	
-	def _run(self):
+	def _setup(self):
 		pkg_install('swift swift-proxy swift-account swift-container swift-object')
 		pkg_install('xfsprogs')
 		pkg_install('curl python-pastedeploy')
@@ -744,7 +857,7 @@ class PrepareImageInstaller(Installer):
 	"""
 	role = 'prepare-image'
 
-	def _run(self):
+	def _setup(self):
 		# Create glance image
 		# 
 		def glance_register(url, name):
@@ -781,7 +894,7 @@ class CreateSampleInstanceInstaller(Installer):
 
 	def _nova(self, *args): return shell('%s %s' % (self._nova_cmd(), ' '.join(args)))
 
-	def _run(self):
+	def _setup(self):
 		# 테스트용 가상머신 생성
 		def get_image(): return output("%s image-list | grep ACTIVE | head -1 | awk '{print $2}'" % (self._nova_cmd())).strip()
 
@@ -818,10 +931,10 @@ def main():
 		except IndexError, e:
 			raise Exception, 'Undefined role: %s' % role
 		
+	what_to_run = None
 	if len(sys.argv) == 2: what_to_run = sys.argv[1]
-	else: what_to_run = None
 
-	runner.run(what_to_run)
+	runner.setup(what_to_run)
 
 
 main()
