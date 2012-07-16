@@ -572,7 +572,7 @@ class NovaBaseInstaller(Installer):
 			shell('brctl addbr %s' % bridge)
 			shell('brctl addif %s %s' % (bridge, self.context['network.bridge_iface']))
 
-		shell('ifconfig %s ups' % bridge)
+		shell('ifconfig %s up' % bridge)
 
 	def _setup_quantum_plugin(self):
 		with self.file('/etc/quantum/plugins/openvswitch/ovs_quantum_plugin.ini') as f:
