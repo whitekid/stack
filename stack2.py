@@ -201,7 +201,7 @@ class Installer(object):
 	def file(self, filename):
 		return self.File(self, filename)
 
-	def _get_with_quantum(self): return bool(self.context['network.with_quantum'])
+	def _get_with_quantum(self): return bool(self.context['network.with_quantum'].lower() == 'true')
 	with_quantum = property(_get_with_quantum)
 
 
@@ -494,7 +494,10 @@ class NovaBaseInstaller(Installer):
 			n['vncserver_proxyclient_address'] = self.context['network.control_ip']
 			n['vncserver_listen'] = get_ip('eth0')
 			# network specific settings
-			n['network_manager'] = 'nova.network.manager.FlatDHCPManager'
+			if self.with_quantum:
+				n['network_manager'] = 'nova.network.quantum.manager.QuantumManager'
+			else:
+				n['network_manager'] = 'nova.network.manager.FlatDHCPManager'
 			n['public_interface'] = self.context['network.public_interface']
 			n['flat_interface'] = self.context['network.bridge_iface']
 			n['flat_network_bridge'] = self.context['network.bridge']
@@ -513,8 +516,6 @@ class NovaBaseInstaller(Installer):
 
 			if self.with_quantum:
 				if self.role in ('network', 'compute'):
-					n['network_manager'] = 'nova.network.quantum.manager.QuantumManager'
-
 					if self.role == 'network':
 						n['linuxnet_interface_driver'] = 'nova.network.linux_net.LinuxOVSInterfaceDriver'
 						n['linuxnet_ovs_integration_bridge'] = self.context['network.bridge']
@@ -557,7 +558,7 @@ class NovaBaseInstaller(Installer):
 				shell(r'ovs-vsctl del-br %s' % bridge)
 
 		else:
-			if output('brctl show | grep -c %s' % bridge).strip() != '0':
+			if output('brctl show | grep -c %s' % bridge).strip() == '1':
 				shell('ifconfig %s down' % bridge)
 				shell('brctl delbr %s' % bridge)
 
