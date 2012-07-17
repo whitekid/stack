@@ -522,10 +522,9 @@ class NovaBaseInstaller(Installer):
 						n['quantum_connection_host'] = self.context['network.control_ip']
 						#n['quantum_connection_port'] = 9393
 						n['quantum_use_dhcp'] = True
-					if self.role == 'compute':
-						n['libvirt_ovs_bridge'] = self.context['network.bridge']
-						n['libvirt_vif_type'] = 'ethernet'
-						n['libvirt_vif_driver'] = 'nova.virt.libvirt.vif.LibvirtOpenVswitchDriver'
+					n['libvirt_ovs_bridge'] = self.context['network.bridge']
+					n['libvirt_vif_type'] = 'ethernet'
+					n['libvirt_vif_driver'] = 'nova.virt.libvirt.vif.LibvirtOpenVswitchDriver'
 
 			n['auto_assign_floating_ip'] = self.context['network.auto_assign_floating_ip']
 			#n['floating_range'] = '10.200.3.0/24'		# TODO: public ip range인데 아직은 고려하지 않음
@@ -554,8 +553,8 @@ class NovaBaseInstaller(Installer):
 		bridge = self.context['network.bridge']
 
 		if self.with_quantum:
-			if output(r'ovs-vsctl list-br | grep -c %s' % bridge).strip() == '1':
-				shell(r'ovs-vsctl del-br %s' % bridge)
+			if output('ovs-vsctl list-br | grep -c %s' % bridge).strip() == '1':
+				shell('ovs-vsctl del-br %s' % bridge)
 
 		else:
 			if output('brctl show | grep -c %s' % bridge).strip() == '1':
@@ -575,12 +574,30 @@ class NovaBaseInstaller(Installer):
 
 		shell('ifconfig %s up' % bridge)
 
+
+	def _cleanup_quantum(self):
+		if not self.with_quantum: return
+
+		pkg_remove('openvswitch-datapath-dkms openvswitch-common')
+		pkg_remove('python-quantum python-quantumclient')
+
+		try_shell("kill -9 `ps ax | grep quantum-openvswitch-agent | grep -v grep | awk '{print $1}'`")
+		try_shell('rm -rf /etc/openvswitch')
+
+	def _setup_quantum(self):
+		pkg_install('quantum-plugin-openvswitch quantum-plugin-openvswitch-agent')
+		self._setup_quantum_plugin()
+
+
 	def _setup_quantum_plugin(self):
 		with self.file('/etc/quantum/plugins/openvswitch/ovs_quantum_plugin.ini') as f:
 			f.replace(
 				'sql_connection = sqlite:\/\/',
 				'sql_connection = mysql:\/\/ovs_quantum:%s@%s:3306\/ovs_quantum' % (self.context['global.passwd'], self.context['network.control_ip']))
 			f.replace('integration-bridge = br-int', 'integration-bridge = %s' % self.context['network.bridge'])
+
+	def _run_quantum_agent(self):
+		shell('quantum-openvswitch-agent /etc/quantum/plugins/openvswitch/ovs_quantum_plugin.ini &')
 
 
 class NovaControllerInstaller(NovaBaseInstaller):
@@ -596,7 +613,8 @@ class NovaControllerInstaller(NovaBaseInstaller):
 		pkg_remove('apache2.2-common')
 		pkg_remove('memcached')
 		if self.with_quantum:
-			pkg_remove('openvswitch-datapath-dkms python-quantum python-quantumclient quantum-server')
+			pkg_remove('python-quantumclient quantum-server')
+			pkg_remove('openvswitch-datapath-dkms python-quantum')
 
 		try_shell('service memcached restart')	# openstack-dashboard에서 사용하는데.. 캐쉬 문제로 에러가 발생하는 경우가 있음
 		try_shell('service rabbitmq-server restart')
@@ -682,25 +700,27 @@ class NovaNetworkInstaller(NovaBaseInstaller):
 
 		pkg_remove('nova-network')
 		try_shell('rm /etc/dnsmasq-nova.conf')
-		if self.with_quantum:
-			pkg_remove('openvswitch-datapath-dkms openvswitch-common')
-			try_shell('rm -rf /etc/openvswitch')
+		self._cleanup_quantum()
 	
 		try_shell('killall dnsmasq')
 		try_shell('ifconfig %s 0.0.0.0' % self.context['network.bridge'])
 		shell('sysctl net.ipv4.ip_forward=0')
 		shell('iptables -F')
 		shell('iptables -F -t nat')
+		try_shell('rm /var/lock/nova/nova-iptables.lock')
 
 	def _setup(self):
 		pkg_install('nova-network')
-		if self.with_quantum: pkg_install('quantum-plugin-openvswitch')
+
+		if self.with_quantum:
+			self._setup_quantum()
+
 		self._nova_config()
 
-		try_shell('rm /var/lock/nova/nova-iptables.lock')
+		shell("service openvswitch-switch restart")
+
 		if self.with_quantum:
-			shell("service openvswitch-switch restart")
-			self._setup_quantum_plugin()
+			self._run_quantum_agent()
 
 		self._setup_bridge()
 
@@ -780,26 +800,21 @@ class NovaComputeInstaller(NovaBaseInstaller):
 
 		# compute depends
 		pkg_remove('nova-compute qemu-common libvirt0 open-iscsi')
-		if self.with_quantum:
-			pkg_remove('openvswitch-datapath-dkms openvswitch-common')
-			try_shell("kill -9 `ps ax | grep quantum-openvswitch-agent | grep -v grep | awk '{print $1}'`")
+		self._cleanup_quantum()
 
 		shell('rm -rf /var/lib/nova/instances/*')
 
 
 	def _setup(self):
-		pkg_install('ntp')
-
 		pkg_install('nova-compute')
 		pkg_install('python-mysqldb')
 		shell('kvm-ok')
 		pkg_remove('dmidecode')	# 이 패키지가 설치되면 kvm이 서비스가 정상작동하지 않음, 아마 ubuntu vm의 문제일 듯..
 
 		self._nova_config()
-		if self.with_quantum:
-			pkg_install('quantum-plugin-openvswitch quantum-plugin-openvswitch-agent')
-			self._setup_quantum_plugin()
 
+		if self.with_quantum:
+			self._setup_quantum()
 			self.file('/etc/libvirt/qemu.conf').append("""cgroup_device_acl = [
     "/dev/null", "/dev/full", "/dev/zero",
     "/dev/random", "/dev/urandom",
@@ -810,14 +825,13 @@ class NovaComputeInstaller(NovaBaseInstaller):
 		shell('service libvirt-bin restart')
 		if self.with_quantum:
 			shell('service openvswitch-switch restart')
+			self._run_quantum_agent()
 		shell('service open-iscsi restart')
 		shell('service nova-compute restart')
 		shell('nova-manage service list')
 
 		self._setup_bridge()
 
-		if self.with_quantum:
-			shell('quantum-openvswitch-agent /etc/quantum/plugins/openvswitch/ovs_quantum_plugin.ini &')
 
 
 class SwiftInstaller(Installer):

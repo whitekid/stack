@@ -10,7 +10,7 @@ use_quantum=`grep -c QuantumManager /etc/nova/nova.conf`
 create_vm() {
 	flavor=9999
 	image=`nova image-list | grep ACTIVE | awk '{print $2}'`
-	network=`nova-manage network list | tail -n +2 | awk '{print $9}'`
+	network=`nova-manage network list | tail -n +2 | head -1 | awk '{print $9}'`
 
 	for i in `seq 1 $vm_count` ; do
 		name="test${i}"
